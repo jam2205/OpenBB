@@ -25,15 +25,26 @@ def detect(cfg: dict, econ: pd.DataFrame, earnings: pd.DataFrame, window: tuple 
     matches = []
     for rule in cfg["regimes"]:
         kws = rule.get("econ_keywords")
-        if kws or rule.get("dates"):
-            hits = [e for e in events_all if any(k.lower() in e.lower() for k in (kws or []))]
+        codes, fams = rule.get("event_codes"), rule.get("families")
+        if kws or rule.get("dates") or codes or fams:
+            hits, labelled = [], set()
+            # Labelled calendar rows (your own calendar): match on event code / family.
+            if not econ.empty and {"event_code", "family"} <= set(econ.columns):
+                labelled = set(econ.loc[econ["event_code"].notna() | econ["family"].notna(), col].astype(str))
+                if codes or fams:
+                    m = econ[econ["event_code"].isin(codes or []) | econ["family"].isin(fams or [])]
+                    for r in m.itertuples():
+                        day = pd.Timestamp(r.date).strftime("%a %d") if pd.notna(r.date) else ""
+                        hits.append(f"{getattr(r, 'currency', '') or ''} {r.event} ({day})".strip())
+            # Keyword matching is for unlabelled sources only (FRED, paid calendars).
+            hits += [e for e in events_all if e not in labelled and any(k.lower() in e.lower() for k in (kws or []))]
             # Explicit dated events (e.g. central-bank decisions): {"2026-12-09": "FOMC decision"}
             if window and rule.get("dates"):
                 for d, label in rule["dates"].items():
                     if window[0] <= pd.Timestamp(str(d)).date() <= window[1]:
                         hits.append(f"{label} ({d})")
             if hits:
-                matches.append({**rule, "events": sorted(set(hits))[:15]})
+                matches.append({**rule, "events": list(dict.fromkeys(hits))[:15]})
         elif "min_focus_reporters" in rule:
             if len(reporters) >= rule["min_focus_reporters"]:
                 matches.append({**rule, "events": []})
@@ -42,7 +53,7 @@ def detect(cfg: dict, econ: pd.DataFrame, earnings: pd.DataFrame, window: tuple 
     if not matches:
         raise ValueError("config.regimes must end with a default rule")
     primary = matches[0]
-    others = [m for m in matches[1:] if "econ_keywords" in m or "dates" in m or "min_focus_reporters" in m]
+    others = [m for m in matches[1:] if any(k in m for k in ("econ_keywords", "dates", "event_codes", "families", "min_focus_reporters"))]
     # Carry the other active week types and all their catalysts so nothing is hidden by priority.
     events = list(primary["events"])
     for m in others:

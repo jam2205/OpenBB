@@ -112,7 +112,7 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         sources.closes(eq_syms, start, ob["price_provider"], "equity"),
         sources.closes(u["fx_openbb"], start, ob["price_provider"], "currency"),
         sources.closes(u.get("fx_ecb", []), start, "ecb", "currency"),
-        sources.minio_closes(u.get("fx_minio", []), cfg["minio"]),
+        _guard("fx_minio", lambda: sources.minio_closes(u.get("fx_minio", []), start), pd.DataFrame()),
     ], axis=1).sort_index()
     prices = prices.rename(columns={**u["metals"], **u["bonds"]})
     yield_cols = [v for k, v in u["bonds"].items() if k.startswith("^")]
@@ -121,12 +121,27 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
 
     # 2. Regime from calendars
     w0, w1 = sources.window(asof)
-    econ = sources.econ_calendar(w0, w1, ob.get("econ_calendar_providers", ["fred_rest", "treasury_auctions"]),
-                                 ob.get("auction_terms"))
+    ccfg = cfg.get("calendar", {})
+    econ = sources.econ_calendar(w0, w1, ob.get("econ_calendar_providers", ["medallion", "fred_rest"]),
+                                 ob.get("auction_terms"), ccfg.get("currencies"), ccfg.get("impacts"))
     earn = sources.earnings_calendar(w0, w1, ob["earnings_provider"])
     regime = _guard("regime", lambda: rg.detect(cfg, econ, earn, (w0, w1)),
                     {**cfg["regimes"][-1], "events": [], "reporters": [], "also": []})
     log.info("Regime: %s", regime["name"])
+
+    def _calendar_table():
+        if econ.empty:
+            return pd.DataFrame()
+        t = econ.copy()
+        t["date"] = pd.to_datetime(t["date"], utc=True, errors="coerce")
+        t["when (UTC)"] = t["date"].dt.strftime("%a %d %b %H:%M")
+        cols = [c for c in ("when (UTC)", "currency", "event", "impact", "forecast", "previous", "calendar_source") if c in t]
+        t = t.sort_values("date")[cols].fillna("").head(ccfg.get("max_rows", 30)).reset_index(drop=True)
+        return t.apply(lambda c: c.astype(str).str.replace("|", " / ", regex=False))  # "|" breaks markdown tables
+
+    calendar_tbl = _guard("calendar table", _calendar_table, pd.DataFrame())
+    carry_tbl = _guard("carry", lambda: __import__("mnp.medallion", fromlist=["x"]).carry(
+        u.get("fx_openbb", []) + u.get("fx_minio", [])), pd.DataFrame())
 
     # 3. NLP over news
     driver_summary = pd.DataFrame()
@@ -200,7 +215,7 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         driver_method=scored["driver_method"].iloc[0] if not scored.empty else "n/a", fundamentals=funds, earnings_tone=earnings_tone,
         y10_move=y10_move, rates=rates, curve_2s10s=curve, gold_y10=gold_y10,
         predictions=predictions, model_note=model_note,
-        fred=fred_tbl, gold_real=gold_real,
+        fred=fred_tbl, gold_real=gold_real, calendar_tbl=calendar_tbl, carry=carry_tbl,
         imf_macro=imf_macro.tail(20) if not imf_macro.empty else imf_macro, chokepoints=choke_tbl,
     )
     path = report.render(ctx, regime["template"], out_dir)

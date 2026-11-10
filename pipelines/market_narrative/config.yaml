@@ -30,7 +30,7 @@ universe:
   bonds:    {^TNX: US10Y yield, ^FVX: US5Y yield, TLT: 20Y+ Treasury ETF}
   fx_openbb: [EURUSD, USDJPY]        # pulled via obb.currency.price.historical
   fx_ecb:    []                     # ECB daily reference rates (no key), e.g. [EURPLN, EURHUF, EURTRY, EURZAR]
-  fx_minio:  []                      # pairs OpenBB doesn't cover -> loaded from MinIO, e.g. [USDNGN, USDKES]
+  fx_minio:  []                      # pairs read from your private hourly candles (can be a large download), e.g. [EURCHF, NZDJPY]
 
 openbb:
   price_provider: yfinance
@@ -40,42 +40,21 @@ openbb:
   earnings_provider: fmp             # needs FMP key; pipeline degrades gracefully without it
   # fred_rest = FRED API releases/dates (your FRED key, one call). treasury_auctions = FiscalData (no key).
   # fmp / tradingeconomics = OpenBB providers that need a paid plan; add them here if you upgrade.
-  econ_calendar_providers: [fred_rest, treasury_auctions]   # treasury_auctions source can lag by weeks
+  # medallion = your own calendar dataset (needs your connector cell + medallion.register).
+  econ_calendar_providers: [medallion, fred_rest, treasury_auctions]
   auction_terms: [10-Year, 20-Year, 30-Year]   # which coupon auctions make it a "bond week"
 
-minio:
-  endpoint_env: MINIO_ENDPOINT       # values read from env / Colab secrets, never stored here
-  access_key_env: MINIO_ACCESS_KEY
-  secret_key_env: MINIO_SECRET_KEY
-  secure: true
-  bucket: fx-data
-  # object path per pair; {pair} is substituted. Expect columns: date, close (open/high/low optional)
-  object_pattern: "daily/{pair}.parquet"
-
-# FRED (key): daily/weekly US macro that drives cross-asset moves. Shown with 1w / 1m changes.
-fred:
-  series:
-    DFII10: 10Y real yield (TIPS)          # main driver of gold
-    T10YIE: 10Y breakeven inflation
-    DFF: Fed funds effective
-    BAMLH0A0HYM2: HY credit spread
-    DTWEXBGS: Broad trade-weighted USD
-    ICSA: Initial jobless claims
-  gold_driver: DFII10
-
-# IMF (no API key). Fill `indicators` with symbols found via the notebook's IMF search cell,
-# e.g. exchange rates for the MinIO currencies or CPI for their countries. Format: "DATAFLOW::INDICATOR".
-imf:
-  countries: [USA, JPN, DEU, GBR, CHN, NGA, KEN]
-  indicators: []
-  # IMF PortWatch's public server now answers "Token Required" (verified 2026-11-10), so this is off.
-  # To retry later: [suez_canal, panama_canal, strait_of_hormuz, bab_el-mandeb_strait, malacca_strait]
-  chokepoints: []
+# Your own economic calendar (the dataset registered under the `calendar` role).
+calendar:
+  currencies: [USD, EUR, JPY, GBP, CHF, NZD, AUD, CAD]   # whose events count
+  impacts: [high]                                        # add "medium" for a busier table
+  max_rows: 30
 
 # Regime = which "cookie cutter" template is used this week. First match wins (priority order).
 regimes:
   - name: central_bank
     template: macro.md.j2
+    event_codes: [RATE_DECISION]      # any central bank in calendar.currencies (medallion calendar)
     econ_keywords: [Fed Interest Rate Decision, Monetary policy meeting]   # for paid calendars (FMP etc.)
     # Decision days. FRED's calendar cannot be used for this: it lists "FOMC Press Release" every
     # day. FOMC 2026 from the Fed's published schedule -- verify at federalreserve.gov and add
@@ -91,6 +70,7 @@ regimes:
       "2026-12-09": FOMC decision
   - name: bond_week
     template: macro.md.j2
+    families: [inflation, labour, auction]   # medallion calendar labels, high impact only
     # Matched against FRED release names and "Treasury Auction: <term> <type>" events.
     econ_keywords: [Consumer Price Index, Personal Income and Outlays, Employment Situation,
                     Gross Domestic Product, Producer Price Index, "Treasury Auction:", CPI, Nonfarm Payrolls, HICP]

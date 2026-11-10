@@ -32,12 +32,29 @@ python -m mnp.run --out reports            # add --no-nlp / --no-model to skip h
 | none: HuggingFace public models, yfinance, IMF, ECB, Federal Reserve | — | prices, company news, all NLP, AcyLa model, IMF macro + PortWatch, EUR reference FX (ECB), SEC MD&A, Treasury curve |
 | `FRED_API_KEY` | **recommended** | US release calendar (bond/Fed week detection without FMP), real yields, breakevens, credit spreads, USD index, claims |
 | `FMP_API_KEY` | **recommended** | earnings calendar (works on the basic plan). Economic calendar and transcripts need a higher FMP plan (HTTP 402 otherwise) |
-| `MINIO_*` (endpoint, access, secret) | for your extra FX pairs | daily FX not on yfinance |
+| your private-store credentials | **recommended** | whatever your own connector cell needs; unlocks your economic calendar, FX carry and extra FX pairs |
 | `HF_TOKEN` | optional | higher HuggingFace download rate limits |
 | `BENZINGA_API_KEY` | optional | world/macro news feed |
 
 The economic calendar comes from direct REST calls (`mnp/rest.py`): FRED's `releases/dates` API with your FRED key, and upcoming Treasury auctions from FiscalData with no key. OpenBB's own FRED calendar scrapes the FRED website and times out, so it is not used. Known limits, verified live on 2026-11-10: FRED lists releases that hold daily series (such as "FOMC Press Release") on every day, so those are filtered out and central-bank decision days come from the dated list in `config.yaml → regimes`. FiscalData's upcoming-auctions feed can lag by weeks, in which case no auction events are added and a warning is logged. IMF PortWatch's public server now requires a token, so the chokepoint section is off by default. When several week types apply (say CPI week plus an NVDA print), the first rule in `config.yaml → regimes` picks the template and the header lists the others. Earnings weeks use FMP's earnings calendar. MD&A text comes from SEC filings (free). Transcripts need a paid FMP plan and are skipped otherwise. API keys are masked in all log output. The notebook accepts common alternative secret names; see `ALIASES` in its second cell.
 In Colab, store keys under Secrets (🔑). The notebook copies them into the environment and OpenBB.
+
+## Your own data
+`mnp/medallion.py` lets the pipeline read datasets from your private store through whatever
+connector cell your notebook already uses. Register the reader and say which dataset plays which role:
+
+```python
+medallion.register(read, tables, datasets={"calendar": "...", "carry": "...", "candles": "..."})
+```
+
+| Role | Used for |
+|---|---|
+| `calendar` | Week detection and the "This week's scheduled events" table. `RATE_DECISION` rows make a central-bank week; high-impact `inflation` / `labour` / `auction` rows make a bond week |
+| `carry` | FX carry table (policy-rate differentials) |
+| `candles` | Daily closes for pairs listed under `universe.fx_minio` |
+
+No addresses, bucket names or dataset names live in this repository. If the calendar has no `actual`
+values, the report shows forecast and previous but cannot compute a surprise.
 
 ## Where to extend
 | Want to… | Edit |

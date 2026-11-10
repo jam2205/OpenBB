@@ -4,6 +4,17 @@
 
 {% endmacro %}
 
+{% macro calendar_block() %}
+{% if calendar_tbl is defined and not calendar_tbl.empty %}
+## This week's scheduled events
+{{ calendar_tbl | md }}
+{% endif %}
+{% if carry is defined and not carry.empty %}
+## FX carry (policy-rate differentials)
+{{ carry | md }}
+{% endif %}
+{% endmacro %}
+
 {% macro drivers_block() %}
 ## News drivers (FinBERT tone × {{ driver_method }} attribution)
 {{ driver_summary | md }}

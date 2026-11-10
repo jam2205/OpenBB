@@ -12,7 +12,7 @@ pandas
 numpy
 pyyaml
 jinja2
-minio
+boto3           # only if your own connector cell needs it
 joblib
 tabulate
 markdown

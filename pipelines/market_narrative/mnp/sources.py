@@ -73,32 +73,14 @@ def ohlcv(symbol: str, start: date, provider: str) -> pd.DataFrame:
     return df
 
 
-def minio_closes(pairs: list[str], cfg: dict) -> pd.DataFrame:
-    """Load FX closes for pairs not covered by OpenBB from MinIO (parquet or csv)."""
-    if not pairs:
-        return pd.DataFrame()
-    from minio import Minio
+def minio_closes(pairs: list[str], start: date) -> pd.DataFrame:
+    """Daily FX closes from your private hourly candles (needs medallion.register)."""
+    from . import medallion
 
-    client = Minio(
-        os.environ[cfg["endpoint_env"]],
-        access_key=os.environ[cfg["access_key_env"]],
-        secret_key=os.environ[cfg["secret_key_env"]],
-        secure=cfg.get("secure", True),
-    )
-    out = {}
-    for pair in pairs:
-        key = cfg["object_pattern"].format(pair=pair)
-        try:
-            resp = client.get_object(cfg["bucket"], key)
-            raw = io.BytesIO(resp.read())
-            resp.close()
-            resp.release_conn()
-            df = pd.read_parquet(raw) if key.endswith(".parquet") else pd.read_csv(raw)
-            df.columns = [c.lower() for c in df.columns]
-            out[pair] = df.set_index(pd.to_datetime(df["date"]))["close"]
-        except Exception as e:  # noqa: BLE001
-            log.warning("MinIO load failed for %s (%s): %s", pair, key, e)
-    return pd.DataFrame(out)
+    if pairs and not medallion.available():
+        log.warning("fx_minio pairs skipped: run your connector cell and medallion.register(...) first")
+        return pd.DataFrame()
+    return medallion.fx_daily_closes(pairs, start)
 
 
 def news(symbols: list[str], provider: str, limit: int = 50) -> pd.DataFrame:
@@ -119,16 +101,22 @@ def earnings_calendar(start: date, end: date, provider: str) -> pd.DataFrame:
 
 
 def econ_calendar(start: date, end: date, providers: list[str] | str,
-                  auction_terms: list[str] | None = None) -> pd.DataFrame:
-    """Union of calendars. `fred_rest` and `treasury_auctions` are direct REST (see rest.py);
-    any other name is an OpenBB `economy.calendar` provider (fmp, tradingeconomics)."""
+                  auction_terms: list[str] | None = None, currencies: list[str] | None = None,
+                  impacts: list[str] | None = None) -> pd.DataFrame:
+    """Union of calendars. `medallion` is your own calendar dataset (see medallion.py);
+    `fred_rest` and `treasury_auctions` are direct REST (see rest.py); any other name is an
+    OpenBB `economy.calendar` provider (fmp, tradingeconomics)."""
     from . import rest
 
     providers = [providers] if isinstance(providers, str) else providers
     frames = []
     for p in providers:
         try:  # a calendar source must never stop the run
-            if p == "fred_rest":
+            if p == "medallion":
+                from . import medallion
+
+                df = medallion.calendar(start, end, currencies, tuple(impacts or ("high",)))
+            elif p == "fred_rest":
                 df = rest.fred_release_calendar(start, end)
             elif p == "treasury_auctions":
                 df = rest.treasury_auctions(start, end, auction_terms)
