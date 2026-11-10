@@ -19,8 +19,16 @@ log = logging.getLogger("mnp")
 ROOT = Path(__file__).resolve().parent.parent
 
 
+_REQUIRED = ("models", "predictive", "universe", "openbb", "calendar", "fred", "snb", "imf", "regimes", "drivers",
+             "corr_window", "lookback_days")
+
+
 def load_config(path: str | Path | None = None) -> dict:
-    return yaml.safe_load(Path(path or ROOT / "config.yaml").read_text())
+    cfg = yaml.safe_load(Path(path or ROOT / "config.yaml").read_text())
+    missing = [k for k in _REQUIRED if k not in cfg]
+    if missing:  # a missing section silently drops a report block, so say it out loud
+        log.warning("config.yaml is missing sections %s: the matching report blocks will be empty", missing)
+    return cfg
 
 
 def _guard(name: str, fn, default):
@@ -181,6 +189,11 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
     imf_macro = _guard("imf", lambda: sources.imf_indicators(
         icfg.get("indicators", []), icfg.get("countries", []), asof - timedelta(days=730)), pd.DataFrame())
     choke_tbl = _guard("chokepoints", lambda: _chokepoint_section(cfg, asof), pd.DataFrame())
+    snb_block = {}
+    if cfg.get("snb", {}).get("enabled", True):
+        from . import snb as snb_mod
+
+        snb_block = _guard("snb", lambda: snb_mod.block(asof), {})
 
     # 5. Fundamentals for reporters (earnings regime)
     funds = {}
@@ -215,7 +228,7 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         driver_method=scored["driver_method"].iloc[0] if not scored.empty else "n/a", fundamentals=funds, earnings_tone=earnings_tone,
         y10_move=y10_move, rates=rates, curve_2s10s=curve, gold_y10=gold_y10,
         predictions=predictions, model_note=model_note,
-        fred=fred_tbl, gold_real=gold_real, calendar_tbl=calendar_tbl, carry=carry_tbl,
+        fred=fred_tbl, gold_real=gold_real, snb=snb_block, calendar_tbl=calendar_tbl, carry=carry_tbl,
         imf_macro=imf_macro.tail(20) if not imf_macro.empty else imf_macro, chokepoints=choke_tbl,
     )
     path = report.render(ctx, regime["template"], out_dir)

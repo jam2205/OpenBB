@@ -53,6 +53,41 @@ _{{ model_note }}_
 {% endmacro %}
 
 {% macro global_block() %}
+{% if snb is defined and snb and snb.policy is defined %}
+## Switzerland / CHF (Swiss National Bank)
+{% if not snb.policy.empty %}
+**Policy and money market** (as of {{ snb.asof.policy }})
+{{ snb.policy | md }}
+{% endif %}
+{% if not snb.sight.empty %}
+**Sight deposits at the SNB, CHF bn** (as of {{ snb.asof.sight }})
+{{ snb.sight | md }}
+_A weekly rise of several CHF bn is the market's usual sign of SNB franc selling. It is a proxy: repo and SNB bill operations move it too._
+{% endif %}
+{% if not snb.fx_tx.empty %}
+**SNB foreign-exchange transactions, CHF bn per quarter** (positive = bought foreign currency; published about one quarter late)
+{{ snb.fx_tx | md }}
+{% endif %}
+{% if not snb.eff_fx.empty %}
+**CHF effective exchange rate** (up = stronger franc; as of {{ snb.asof.eff_fx }})
+{{ snb.eff_fx | md }}
+{% endif %}
+{% if not snb.curve.empty %}
+**Confederation yield curve** (interpolated from individual bonds; as of {{ snb.asof.curve }})
+{{ snb.curve | md }}
+{% endif %}
+{% if not snb.global_rates.empty %}
+**Official rates and the gap to the SNB** (monthly, as of {{ snb.asof.global_rates }})
+{{ snb.global_rates | md }}
+{% endif %}
+{% if not snb.reserves.empty %}
+**SNB reserves by currency** ({{ snb.asof.reserves }}{% if snb.reserves_total %}, total CHF {{ snb.reserves_total }} bn{% endif %})
+{{ snb.reserves | md }}
+{% endif %}
+{% for n in snb.notes %}
+- ⚠️ {{ n }}
+{% endfor %}
+{% endif %}
 {% if chokepoints is defined and not chokepoints.empty %}
 ## Shipping chokepoints (IMF PortWatch)
 {{ chokepoints | md }}

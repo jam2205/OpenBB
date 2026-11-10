@@ -50,6 +50,30 @@ calendar:
   impacts: [high]                                        # add "medium" for a busier table
   max_rows: 30
 
+# FRED (key): daily/weekly US macro that drives cross-asset moves. Shown with 1w / 1m changes.
+fred:
+  series:
+    DFII10: 10Y real yield (TIPS)          # main driver of gold
+    T10YIE: 10Y breakeven inflation
+    DFF: Fed funds effective
+    BAMLH0A0HYM2: HY credit spread
+    DTWEXBGS: Broad trade-weighted USD
+    ICSA: Initial jobless claims
+  gold_driver: DFII10
+
+# Swiss National Bank data portal (data.snb.ch): no key. Adds the Switzerland / CHF section.
+snb:
+  enabled: true
+
+# IMF (no API key). Fill `indicators` with symbols found via the notebook's IMF search cell.
+# Format: "DATAFLOW::INDICATOR".
+imf:
+  countries: [USA, JPN, DEU, GBR, CHN, CHE, NZL]
+  indicators: []
+  # IMF PortWatch's public server now answers "Token Required" (verified 2026-11-10), so this is off.
+  # To retry later: [suez_canal, panama_canal, strait_of_hormuz, bab_el-mandeb_strait, malacca_strait]
+  chokepoints: []
+
 # Regime = which "cookie cutter" template is used this week. First match wins (priority order).
 regimes:
   - name: central_bank

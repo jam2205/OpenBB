@@ -56,6 +56,19 @@ medallion.register(read, tables, datasets={"calendar": "...", "carry": "...", "c
 No addresses, bucket names or dataset names live in this repository. If the calendar has no `actual`
 values, the report shows forecast and previous but cannot compute a surprise.
 
+## Swiss National Bank
+`mnp/snb.py` reads the SNB data portal (data.snb.ch, no key) and adds a Switzerland / CHF section:
+policy rate and SARON, **sight deposits** (the usual intervention proxy), the SNB's own quarterly
+**FX transactions**, the CHF effective exchange rate, a Confederation yield curve interpolated from
+individual bonds, official rates of the Fed / ECB / BoE / BoJ against the SNB, and the currency
+split of the SNB's reserves. All seven cubes were verified live on 2026-11-10. Each table carries its
+own "as of" date and is flagged when older than its release rhythm allows. The portal's older yield
+cubes (`rendoblid`, `rendopar`) stopped in July 2025 and are deliberately not used.
+
+## FMP
+FMP serves different endpoints per plan and answers 402 for the rest. `mnp/fmp_probe.py` asks each
+endpoint once and reports which ones your key can use, so sources are chosen from evidence.
+
 ## Where to extend
 | Want to… | Edit |
 |---|---|
