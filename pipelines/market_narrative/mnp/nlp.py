@@ -58,8 +58,16 @@ class NLP:
         from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 
         kw = modernbert_kwargs(self.device) if "modern" in str(model_id).lower() or Path(str(model_id)).exists() else {}
-        model = AutoModelForSequenceClassification.from_pretrained(model_id, **kw)
-        tok = AutoTokenizer.from_pretrained(model_id)
+        try:
+            model = AutoModelForSequenceClassification.from_pretrained(model_id, **kw)
+            tok = AutoTokenizer.from_pretrained(model_id)
+        except ValueError:
+            # Older repos (e.g. yiyanghkust/finbert-tone) have no `model_type` in config.json,
+            # which newer transformers needs for auto-detection. They are plain BERT.
+            from transformers import BertForSequenceClassification, BertTokenizer
+
+            model = BertForSequenceClassification.from_pretrained(model_id)
+            tok = BertTokenizer.from_pretrained(model_id)
         return pipeline("text-classification", model=model, tokenizer=tok,
                         device=0 if self.device == "cuda" else -1, truncation=True, max_length=max_length)
 

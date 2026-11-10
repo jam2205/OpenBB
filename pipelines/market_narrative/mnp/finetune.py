@@ -24,9 +24,9 @@ import pandas as pd
 
 
 def weak_tone_labels(texts: list[str], teacher: str = "yiyanghkust/finbert-tone", min_conf: float = 0.8) -> pd.DataFrame:
-    from transformers import pipeline
+    from .nlp import NLP
 
-    pipe = pipeline("text-classification", model=teacher, truncation=True, max_length=512)
+    pipe = NLP({"device": "auto"})._clf(teacher, 512)
     res = pd.DataFrame(pipe(texts, batch_size=32))
     df = pd.DataFrame({"text": texts, "label": res["label"].str.lower(), "conf": res["score"]})
     return df[df.conf >= min_conf].drop(columns="conf")
