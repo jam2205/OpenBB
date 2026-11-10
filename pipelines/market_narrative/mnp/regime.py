@@ -37,7 +37,12 @@ def detect(cfg: dict, econ: pd.DataFrame, earnings: pd.DataFrame, window: tuple 
                         hits.append(f"{getattr(r, 'currency', '') or ''} {r.event} ({day})".strip())
             # Keyword matching is for unlabelled sources only (FRED, paid calendars).
             if kws and col:
-                for r in econ.itertuples():
+                # Where a source grades impact, the week's catalysts are its high-impact rows;
+                # fall back to every row only when no high-impact row matches.
+                unl = econ[~econ[col].astype(str).isin(labelled)]
+                unl = unl[unl[col].astype(str).map(lambda n: any(k.lower() in n.lower() for k in kws))]
+                top = unl[unl["impact"].astype(str).str.lower() == "high"] if "impact" in unl else unl
+                for r in (top if not top.empty else unl).itertuples():
                     name = str(getattr(r, col))
                     if name in labelled or not any(k.lower() in name.lower() for k in kws):
                         continue

@@ -47,6 +47,8 @@ def _md(df: pd.DataFrame | None) -> str:
     align = ["left"] if show_index else []
     for c in df.columns:
         col = df[c]
+        if col.dtype == object and len(col.dropna()) and col.dropna().map(lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)).all():
+            col = pd.to_numeric(col, errors="coerce")   # numbers stored as objects still get number formatting
         if pd.api.types.is_bool_dtype(col):
             df[c] = col.map(lambda v: "yes" if v else "")
             align.append("left")

@@ -136,11 +136,14 @@ def run(pair_list: list[str] | None = None, out_dir: str | Path = "reports/pairs
         except Exception as e:  # noqa: BLE001  one pair must not stop the others
             log.warning("pair brief %s skipped: %s: %s", pr, type(e).__name__, str(e)[:200])
             b = {"pair": pr.upper(), "error": f"{type(e).__name__}: {str(e)[:120]}"}
-        rows.append(row(b))
+        if "error" not in b:
+            try:
+                briefs[b["pair"]] = report.render_named({"b": b, "p": b["day"], "w": b["week"]}, "pair.md.j2", out, f"{b['pair']}_{b['asof']:%Y-%m-%d_%H%M}")
+            except Exception as e:  # noqa: BLE001
+                b = {"pair": b["pair"], "error": f"could not write the brief: {type(e).__name__}: {str(e)[:160]}"}
         if "error" in b:
             log.warning("pair brief %s: %s", b["pair"], b["error"])
-            continue
-        briefs[b["pair"]] = report.render_named({"b": b, "p": b["day"], "w": b["week"]}, "pair.md.j2", out, f"{b['pair']}_{b['asof']:%Y-%m-%d_%H%M}")
+        rows.append(row(b))
     rows_path = out / "pairs_latest.json"
     rows_path.write_text(json.dumps({"generated_at": pd.Timestamp.now(tz="UTC").isoformat(), "rows": rows}, indent=1, default=str))
     return {"briefs": briefs, "rows": rows_path, "table": pd.DataFrame(rows)}

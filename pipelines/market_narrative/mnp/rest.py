@@ -185,8 +185,9 @@ def benzinga_calendar(start: date, end: date, currencies: list[str] | None = Non
     previous, actual, surprise.
 
     Endpoint and field names were verified on a live key (probe run 2026-11-10: 1000 events in 30
-    days, 37% with both actual and consensus, importance values 1/2/3/5). The response does not
-    state a timezone; Benzinga documents its calendars in US Eastern time, and that is assumed here.
+    days, 37% with both actual and consensus, importance values 1/2/3/5). Importance 5 is shown
+    as "high" and 3 as "medium": a week at importance 3 and above ran to 80 rows, mostly speeches.
+    The response does not state a timezone; US Eastern is assumed.
     """
     key = api_key or os.environ.get("BENZINGA_API_KEY")
     if not key:
@@ -218,16 +219,28 @@ def benzinga_calendar(start: date, end: date, currencies: list[str] | None = Non
         return pd.DataFrame()
     imp = imp.loc[df.index]
 
+    def num(x) -> str:
+        try:
+            f = float(x)
+        except (TypeError, ValueError):
+            return str(x)
+        return f"{f:,.0f}" if f == round(f) and abs(f) >= 1000 else f"{f:,.3f}".rstrip("0").rstrip(".")
+
     def val(col, unit):
-        v = df[col].astype(str).where(~_blank(df[col]), "") if col in df else pd.Series("", index=df.index)
-        u = df[unit].astype(str).where(~_blank(df[unit]), "") if unit in df else ""
+        v = df[col].map(num).where(~_blank(df[col]), "") if col in df else pd.Series("", index=df.index)
+        u = df[unit].astype(str).str.strip().where(~_blank(df[unit]), "") if unit in df else pd.Series("", index=df.index)
+        u = u.where(u.isin(["%", ""]) | (u.str.len() <= 1), " " + u)   # "195K" and "0.3%", but "-865,000 Barrels"
         return (v + u).where(v != "", "")
+
+    # Germany, France, Italy and Spain all map to EUR: say whose number it is.
+    member = df["country"].where(df["country"].isin(["DEU", "FRA", "ITA", "ESP"]), "").astype(str) if "country" in df else pd.Series("", index=df.index)
+    df = df.assign(event_name=(member + " " + df["event_name"].astype(str)).str.strip())
 
     period = df["event_period"].astype(str).where(~_blank(df["event_period"]), "") if "event_period" in df else ""
     out = pd.DataFrame({
         "date": df["date"], "currency": df["currency"], "country": df.get("country"),
         "event": (df["event_name"].astype(str) + (" (" + period + ")").where(period != "", "")) if isinstance(period, pd.Series) else df["event_name"].astype(str),
-        "impact": imp.map(lambda i: "high" if i >= 3 else "medium" if i >= 2 else "low"),
+        "impact": imp.map(lambda i: "high" if i >= 4 else "medium" if i >= 3 else "low"), "importance": imp,
         "forecast": val("consensus", "consensus_t"), "previous": val("prior", "prior_t"), "actual": val("actual", "actual_t"),
     })
     if "actual" in df and "consensus" in df:

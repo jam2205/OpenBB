@@ -97,6 +97,7 @@ def roles() -> dict[str, str]:
 
 
 def role(name: str) -> str | None:
+    available()   # adopts the notebook's reader if the registration was lost
     return _datasets.get(name)
 
 
@@ -120,7 +121,7 @@ def tables() -> list[str]:
 
 
 def dataset(name: str | None, **kw) -> pd.DataFrame:
-    if _read is None or not name:
+    if not available() or not name:
         return pd.DataFrame()
     try:
         return _read(name, **kw)
@@ -278,7 +279,7 @@ def positioning(pairs: list[str] | None = None, top: int = 6) -> pd.DataFrame:
 def _filtered(name: str | None, pair: str, columns: list[str] | None = None) -> pd.DataFrame:
     """One pair's rows. Readers differ in what they accept, so try a pushed-down filter first
     and fall back to reading the dataset and filtering here."""
-    if _read is None or not name:
+    if not available() or not name:
         return pd.DataFrame()
     for kw in ({"columns": columns, "filters": [("pair", "==", pair)]}, {}):
         try:

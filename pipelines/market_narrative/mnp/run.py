@@ -209,11 +209,16 @@ def _run(cfg: dict, asof: date | None, out_dir, use_nlp: bool, use_model: bool, 
         dated_only = (t["date"].dt.hour == 0) & (t["date"].dt.minute == 0)
         t["when (UTC)"] = t["date"].dt.strftime("%a %d %b %H:%M").where(~dated_only, t["date"].dt.strftime("%a %d %b"))
         cols = [c for c in ("when (UTC)", "currency", "event", "impact", "forecast", "previous", "actual", "calendar_source") if c in t]
-        t = t.sort_values("date")[cols]
+        t = t.sort_values("date")[cols].reset_index(drop=True)
         t = t.drop(columns=[c for c in ("forecast", "previous", "actual", "impact") if c in t and t[c].fillna("").astype(str).str.strip().eq("").all()])
         cap = ccfg.get("max_rows", 40)
-        t.attrs["hidden"] = max(len(t) - cap, 0)
-        return t.head(cap).fillna("").astype(str).reset_index(drop=True)
+        hidden = max(len(t) - cap, 0)
+        if hidden and "impact" in t:   # over the cap: keep the highest-impact rows, still shown in time order
+            rank = t["impact"].astype(str).str.lower().map({"high": 0, "medium": 1, "low": 2}).fillna(1)
+            t = t.loc[rank.sort_values(kind="stable").index[:cap]].sort_index()
+        t = t.head(cap).fillna("").astype(str).reset_index(drop=True)
+        t.attrs["hidden"] = hidden
+        return t
 
     calendar_tbl = _guard("calendar table", _calendar_table, pd.DataFrame())
     from . import medallion

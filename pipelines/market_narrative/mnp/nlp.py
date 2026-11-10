@@ -137,7 +137,9 @@ class NLP:
         texts = news["text"].tolist()
         tone = self.tone(texts)
         out = news.copy().reset_index(drop=True)
-        out[["tone", "tone_score", "signed"]] = tone[["label", "score", "signed"]].values
+        out["tone"] = tone["label"].to_numpy()
+        out["tone_score"] = tone["score"].to_numpy(dtype=float)   # set one by one: a mixed .values block turns numbers into objects
+        out["signed"] = tone["signed"].to_numpy(dtype=float)
         if self.cfg.get("sentiment_check"):
             chk = self.tone(texts, check=True)
             out["tone_check"] = chk["label"].values
