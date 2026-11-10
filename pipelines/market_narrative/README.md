@@ -81,6 +81,18 @@ but only a rate outside the random-walk band says the market is doing something 
 researching. The briefs never call a direction, and nothing in them has been through a
 registered test with a control: they are context for a setup and a source of hypotheses.
 
+A second control keeps the pair's long-run drift in the walk. A rate outside the plain band but
+inside the drift band is the pair's trend; outside both, it is skew or reversal in the moves. The
+brief's `tilt` column says which. First real-data runs (2026-11-10/11, three hours of the day):
+most readings matched the random walk, and the exceptions were mostly lows on pairs quoted
+against JPY or CHF holding 3-6 points more often. That is a hypothesis to register, not a finding.
+
+**Lagging pairs.** When a pair's candles have fallen behind (`pairs.max_age_h`), newer hourly
+bars are appended from your other hourly candle datasets, then from a public REST feed (yfinance
+through OpenBB). The other feed's clock is proven against the main feed on overlapping hours
+first (closes must agree within 0.15%); if it cannot be, nothing is added and the brief stays
+flagged stale. The brief and the row's `bars_note` say where the tail came from.
+
 `pairs.run()` also writes `reports/pairs/pairs_latest.json`, one flat row per pair.
 
 ## Serving it to agents (OpenBB MCP)

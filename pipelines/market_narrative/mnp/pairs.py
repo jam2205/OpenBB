@@ -50,6 +50,78 @@ def _yield_gap(base: str, quote: str, yields: pd.DataFrame) -> dict:
     return out
 
 
+def _rest_hourly(pair: str, start: pd.Timestamp) -> pd.DataFrame:
+    """Recent hourly bars for one pair from a public REST source (yfinance through OpenBB)."""
+    from . import sources
+
+    df = sources._safe(sources._obb().currency.price.historical, symbol=pair, interval="1h",
+                       start_date=start.date(), provider="yfinance")
+    if df.empty or not {"high", "low", "close"} <= set(df.columns):
+        return pd.DataFrame()
+    df = df.reset_index().rename(columns={"date": "time", "index": "time"})
+    return df[[c for c in ("time", "open", "high", "low", "close") if c in df]]
+
+
+def _aligned(main: pd.DataFrame, extra: pd.DataFrame, tol: float = 0.0015, min_overlap: int = 12) -> pd.DataFrame:
+    """`extra` with its timestamps proven against `main`, or an empty frame.
+
+    Another feed may stamp bars in another timezone or at the bar's close. Each candidate
+    reading of its clock is tried, and one is accepted only if, on the hours both feeds have,
+    the closes agree (median gap under 0.15%) and no other reading agrees better. Without that
+    proof the bars are not used: a shifted bar would move the day's high and low."""
+    raw = pd.to_datetime(extra["time"], errors="coerce")
+    best, best_gap = pd.DataFrame(), np.inf
+    for tz in ("UTC", "America/New_York", "Europe/London"):
+        for shift_h in (0, -1):
+            try:
+                t = raw.dt.tz_localize(tz, ambiguous="NaT", nonexistent="NaT") if raw.dt.tz is None else raw
+            except (TypeError, ValueError):
+                continue
+            t = t.dt.tz_convert("UTC").dt.floor("h") + pd.Timedelta(hours=shift_h)
+            cand = extra.assign(time=t).dropna(subset=["time", "high", "low", "close"]).drop_duplicates("time", keep="last")
+            j = cand.merge(main[["time", "close"]], on="time", suffixes=("", "_main"))
+            if len(j) < min_overlap:
+                continue
+            gap = float((j["close"] / j["close_main"] - 1).abs().median())
+            if gap < best_gap:
+                best, best_gap = cand, gap
+            if raw.dt.tz is not None and shift_h == -1:
+                break
+        if raw.dt.tz is not None:
+            break
+    return best if best_gap < tol else pd.DataFrame()
+
+
+def top_up(pair: str, bars: pd.DataFrame, max_age_h: float = 3.0, sources_order: tuple[str, ...] = ("store", "rest")) -> tuple[pd.DataFrame, str | None]:
+    """If the pair's bars have fallen behind, append newer hourly bars from another source.
+
+    Order: your other hourly candle datasets ("store"), then a public REST feed ("rest"). Bars
+    are appended only after `_aligned` has proven the other feed's clock against the main one,
+    and only hours that have closed. Returns (bars, note); note names the source and how many
+    bars it supplied, or says why nothing could be added. History is never replaced."""
+    now = pd.Timestamp.now(tz="UTC")
+    last = bars["time"].iloc[-1]
+    if (now - last).total_seconds() / 3600 - 1 <= max_age_h or now.weekday() >= 5:
+        return bars, None
+    tried = []
+    for src in sources_order:
+        cands = medallion.other_hourly(pair, last) if src == "store" else [("yfinance (REST)", _rest_hourly(pair, last - pd.Timedelta(days=5)))]
+        for name, extra in cands:
+            if extra.empty:
+                tried.append(f"{name}: nothing returned")
+                continue
+            ok = _aligned(bars.tail(24 * 30), extra)
+            new = ok[(ok["time"] > last) & (ok["time"] + pd.Timedelta(hours=1) <= now)] if not ok.empty else ok
+            if new.empty:
+                tried.append(f"{name}: {'no newer closed bars' if not ok.empty else 'could not be matched to the main feed'}")
+                continue
+            if "open" not in new:
+                new = new.assign(open=new["close"].shift(1).fillna(bars["close"].iloc[-1]))
+            out = pd.concat([bars, new[[c for c in bars.columns if c in new]]], ignore_index=True).sort_values("time").reset_index(drop=True)
+            return out, f"main candles stopped at {last:%a %d %b %H:%M} UTC; the last {len(new)} hourly bars come from {name}"
+    return bars, f"main candles stopped at {last:%a %d %b %H:%M} UTC and no other source could fill the gap ({'; '.join(tried) or 'none available'})"
+
+
 def brief(pair: str, now: pd.Timestamp | None = None, cfg: dict | None = None, shared: dict | None = None) -> dict:
     """Everything the pair template needs. `shared` carries tables that are the same for every
     pair (yields, calendar) so a run over many pairs reads them once."""
@@ -59,6 +131,14 @@ def brief(pair: str, now: pd.Timestamp | None = None, cfg: dict | None = None, s
     bars = medallion.hourly(pair, date.today() - timedelta(days=int(pcfg.get("history_days", 3650))))
     if bars.empty:
         return {"pair": pair, "error": "no hourly bars for this pair in your candles dataset"}
+    note = None
+    if now is None and pcfg.get("top_up", True):   # a replay (`now` given) reads history only
+        try:
+            bars, note = top_up(pair, bars, float(pcfg.get("max_age_h", 3)), tuple(pcfg.get("top_up_sources", ["store", "rest"])))
+        except Exception as e:  # noqa: BLE001  a failed top-up leaves the brief as it was, flagged stale
+            note = f"top-up failed: {type(e).__name__}: {str(e)[:120]}"
+        if note:
+            log.warning("%s: %s", pair, note)
     now = pd.Timestamp(now).tz_convert("UTC") if now is not None else bars["time"].iloc[-1] + pd.Timedelta(hours=1)
     fc = medallion.range_forecast(pair, now)
     p = profile.day_profile(bars, now, fc.get("forecast_range"))
@@ -87,7 +167,7 @@ def brief(pair: str, now: pd.Timestamp | None = None, cfg: dict | None = None, s
     reg = medallion.regime(pair, now)
     lv, hv = profile.verdict(p["low_hold"]), profile.verdict(p["high_hold"])
     return {
-        "pair": pair, "base": base, "quote": quote, "asof": p["asof"], "data_age_h": round(age_h, 1), "stale": age_h > float(pcfg.get("max_age_h", 3)),
+        "pair": pair, "base": base, "quote": quote, "bars_note": note, "asof": p["asof"], "data_age_h": round(age_h, 1), "stale": age_h > float(pcfg.get("max_age_h", 3)),
         "template": _template(p, today), "day": p, "week": w, "low_verdict": lv, "high_verdict": hv, "forecast": fc,
         "events_today": len(today), "calendar": cal_tbl, "yield_gap": _yield_gap(base, quote, shared["yields"]),
         "carry": carry, "positioning": cot, "regime": reg,
@@ -100,12 +180,14 @@ def row(b: dict) -> dict:
         return {"pair": b["pair"], "error": b["error"]}
     p, lo, hi, w = b["day"], b["day"]["low_hold"], b["day"]["high_hold"], b.get("week") or {}
     out = {
-        "pair": b["pair"], "ts": b["asof"].isoformat(), "source": "mnp_pair_brief", "template": b["template"], "data_age_h": b["data_age_h"],
+        "pair": b["pair"], "ts": b["asof"].isoformat(), "source": "mnp_pair_brief", "template": b["template"], "data_age_h": b["data_age_h"], "bars_note": b.get("bars_note"),
         "stale": bool(b["stale"]), "hours_into_day": p["hours_elapsed"], "last": p["last"], "day_low": p["low"], "day_high": p["high"],
         "expected_range": p["expected_range"], "expected_from": p["expected_from"], "used_of_expected": p["used_of_expected"],
         "p_low_in": lo["p"], "p_low_in_baseline": lo["baseline"], "p_low_in_random_walk": lo.get("null"), "low_vs_random_walk": lo["vs_null"],
+        "p_low_in_drifting_walk": lo.get("drift"), "low_tilt": lo["tilt"],
         "low_n_days": lo["n_days"], "low_n_weeks": lo["n_weeks"], "low_verdict": b["low_verdict"],
         "p_high_in": hi["p"], "p_high_in_baseline": hi["baseline"], "p_high_in_random_walk": hi.get("null"), "high_vs_random_walk": hi["vs_null"],
+        "p_high_in_drifting_walk": hi.get("drift"), "high_tilt": hi["tilt"],
         "high_n_days": hi["n_days"], "high_n_weeks": hi["n_weeks"], "high_verdict": b["high_verdict"],
         "high_if_low_holds": p["high_if_low_holds"], "low_if_high_holds": p["low_if_high_holds"], "events_before_roll": b["events_today"],
         "week_low": (w.get("low") or {}).get("level"), "p_week_low_in": (w.get("low") or {}).get("p"),

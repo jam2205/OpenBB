@@ -19,6 +19,12 @@ The random walk is built from the pair's own bars: each hourly bar is mirrored a
 with probability one half, which keeps every hour's volatility and removes any directional
 pattern. The same day/hour/condition statistic is then recomputed on each mirrored history.
 
+A second walk (`drift`) mirrors each bar around the pair's average hourly move instead, so the
+long-run drift is kept and only the asymmetry between up and down moves is removed. A rate
+outside the plain band but inside the drift band is the pair's trend showing; outside both, it
+is skew or reversal. First seen on real data 2026-11-10/11: lows on pairs quoted against JPY
+and CHF held 3-6 points more often than the plain walk at three different hours.
+
 What this is not: a tested claim. One observation per day, counted in days and in distinct
 weeks, read only from bars that had closed. Nothing here has been through a registered run
 with a control. It says nothing about direction beyond which extreme is more likely to stand.
@@ -94,27 +100,35 @@ def _cells(H, L, ageH, ageL, adr, ok, k_now: int, ub: int, ab_low: int | None, a
     return in_u, low, high
 
 
-def _mirrored(b: pd.DataFrame, rng: np.random.Generator):
-    """(high, low) of a history in which each bar is mirrored around its open half the time."""
+def _mirrored(b: pd.DataFrame, rng: np.random.Generator, keep_drift: bool = False):
+    """(high, low) of a history in which each bar is mirrored half the time.
+
+    Plain: mirrored around its open, so up and down become equally likely and the pair's
+    long-run drift is removed. `keep_drift`: mirrored around the pair's average hourly move, so
+    the drift survives exactly and only the asymmetry between up and down moves (skew, reversal)
+    is removed. Comparing the two says whether a tilt is drift or something else."""
     c, h, l = np.log(b["close"].to_numpy(float)), np.log(b["high"].to_numpy(float)), np.log(b["low"].to_numpy(float))
     o = np.log(b["open"].to_numpy(float)) if "open" in b else np.r_[c[0], c[:-1]]
     gap = np.r_[0.0, o[1:] - c[:-1]]
     flip = rng.random(len(c)) < 0.5
-    rc = np.where(flip, -(c - o), c - o)
-    rh = np.where(flip, -(l - o), h - o)
-    rl = np.where(flip, -(h - o), l - o)
+    m2 = 2 * float(np.mean(c - o)) if keep_drift else 0.0
+    rc = np.where(flip, m2 - (c - o), c - o)
+    rh = np.where(flip, m2 - (l - o), h - o)
+    rl = np.where(flip, m2 - (h - o), l - o)
+    rh, rl = np.maximum(rh, np.maximum(rc, 0.0)), np.minimum(rl, np.minimum(rc, 0.0))   # a bar still contains its open and close
     close = o[0] + np.cumsum(gap + rc)
     open_ = np.r_[o[0], close[:-1] + gap[1:]]
     return np.exp(open_ + rh), np.exp(open_ + rl)
 
 
-def _null_band(b, days, di, kk, today: int, k_now: int, ub: int, ab_low, ab_high, n: int, seed: int) -> dict:
+def _null_band(b, days, di, kk, today: int, k_now: int, ub: int, ab_low, ab_high, n: int, seed: int,
+               keep_drift: bool = False, key: str = "null") -> dict:
     """Hold rates of the same state on `n` volatility-matched random walks: mean and 2.5-97.5% band."""
     if n <= 0 or "close" not in b:
         return {}
     rng, lows, highs = np.random.default_rng(seed), [], []
     for _ in range(n):
-        nh, nl = _mirrored(b, rng)
+        nh, nl = _mirrored(b, rng, keep_drift)
         nbars, H, L, ageH, ageL = _matrices(len(days), di, kk, nh, nl)
         complete = nbars >= MIN_BARS
         hist = complete.copy()
@@ -128,7 +142,7 @@ def _null_band(b, days, di, kk, today: int, k_now: int, ub: int, ab_low, ab_high
             highs.append(float((H[ch, k_now] >= H[ch, -1]).mean()))
 
     def band(x):
-        return {"null": float(np.mean(x)), "null_low": float(np.quantile(x, 0.025)), "null_high": float(np.quantile(x, 0.975))} if len(x) >= 5 else {}
+        return {key: float(np.mean(x)), f"{key}_low": float(np.quantile(x, 0.025)), f"{key}_high": float(np.quantile(x, 0.975))} if len(x) >= 5 else {}
 
     return {"low": band(lows), "high": band(highs)}
 
@@ -200,12 +214,18 @@ def day_profile(bars: pd.DataFrame, now: pd.Timestamp | None = None, ref_range: 
             else:
                 ch, abH = in_u, None
     null = _null_band(b, days, di, kk, today, k_now, ub, abL, abH, null_runs, seed)
+    drift = _null_band(b, days, di, kk, today, k_now, ub, abL, abH, null_runs, seed + 1, keep_drift=True, key="drift")
+
+    def against(r, key, label):
+        return (f"no {label} comparison" if key not in r else f"above a {label}" if r["p"] > r[f"{key}_high"] else
+                f"below a {label}" if r["p"] < r[f"{key}_low"] else f"same as a {label}")
 
     def side(final, cell, age_h, name):
-        r = {**_hold(final, cell, weeks, ok), "age_h": age_h, "matched_on": notes[name], **null.get(name, {})}
-        r["vs_null"] = ("no random-walk comparison" if "null" not in r else
-                        "above a random walk" if r["p"] > r["null_high"] else
-                        "below a random walk" if r["p"] < r["null_low"] else "same as a random walk")
+        r = {**_hold(final, cell, weeks, ok), "age_h": age_h, "matched_on": notes[name], **null.get(name, {}), **drift.get(name, {})}
+        r["vs_null"], r["vs_drift"] = against(r, "null", "random walk"), against(r, "drift", "drifting walk")
+        off, off_d = not r["vs_null"].startswith(("same", "no")), not r["vs_drift"].startswith(("same", "no"))
+        r["tilt"] = ("none" if not off else "explained by the pair's drift" if not off_d else
+                     "not explained by drift (skew or reversal in the moves)")
         return r
 
     low, high = side(lows_final, cl, aL, "low"), side(highs_final, ch, aH, "high")

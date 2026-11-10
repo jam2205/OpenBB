@@ -84,6 +84,11 @@ pairs:
          NZDJPY, USDCAD, USDCHF, USDJPY, CADCHF, CADJPY, CHFJPY]
   history_days: 3650      # how far back the "how often did it hold" frequencies look
   max_age_h: 3            # older bars than this and the brief is marked "not the current state"
+  # A pair whose candles have fallen behind is topped up with newer hourly bars: first from your
+  # other hourly candle datasets, then from a public REST feed (yfinance). Bars are used only when
+  # their clock is proven against the main feed on overlapping hours. Set top_up: false to switch off.
+  top_up: true
+  top_up_sources: [store, rest]
 
 # FRED (key): daily/weekly US macro that drives cross-asset moves. Shown with 1w / 1m changes.
 fred:

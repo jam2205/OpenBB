@@ -336,3 +336,27 @@ def regime(pair: str, now: pd.Timestamp, max_age_h: float = 48) -> pd.DataFrame:
                        index=pd.Index(last["vocabulary"].fillna("unlabelled").to_numpy(), name="vocabulary"))
     out["stale"] = out["age_h"] > max_age_h
     return out
+
+
+def other_hourly(pair: str, after: pd.Timestamp) -> list[tuple[str, pd.DataFrame]]:
+    """Bars for one pair newer than `after` from your OTHER hourly candle datasets (a second
+    feed, leg-built crosses, a seed archive ...), smallest dataset name first. Used to top up a
+    pair whose main candles have fallen behind."""
+    if not available() or _tables is None:
+        return []
+    main = role("candles")
+    try:
+        names = [n for n in _tables() if n != main and re.search(r"(candle.*1h|1h.*candle|dukascopy.*(1h|h1))", n, re.I)]
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for n in sorted(names, key=lambda x: (len(x), x)):
+        df = _filtered(n, pair)
+        if df.empty or not {"time", "high", "low", "close"} <= set(df.columns):
+            continue
+        df = df[[c for c in ("time", "open", "high", "low", "close") if c in df]].copy()
+        df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
+        df = df.dropna(subset=["time", "high", "low", "close"]).sort_values("time")
+        if (df["time"] > after).any():
+            out.append((n, df.reset_index(drop=True)))
+    return out

@@ -1,9 +1,14 @@
 {% macro rate(s) %}{{ "%.0f%%" | format(100 * s.p) }} (all days at this hour: {{ "%.0f%%" | format(100 * s.baseline) }}, {{ "%+.0f" | format(s.lift_pp) }} points; {{ s.n_days }} days in {{ s.n_weeks }} weeks; 95% range {{ "%.0f" | format(100 * s.ci_low) }}-{{ "%.0f%%" | format(100 * s.ci_high) }}){% endmacro %}
 {% macro nullcell(s) %}{% if s.null is defined %}{{ "%.0f%%" | format(100 * s.null) }} ({{ "%.0f" | format(100 * s.null_low) }}-{{ "%.0f%%" | format(100 * s.null_high) }}): **{{ s.vs_null }}**{% else %}n/a{% endif %}{% endmacro %}
+{% macro driftcell(s) %}{% if s.drift is defined %}{{ "%.0f%%" | format(100 * s.drift) }} ({{ "%.0f" | format(100 * s.drift_low) }}-{{ "%.0f%%" | format(100 * s.drift_high) }}){% else %}n/a{% endif %}{% endmacro %}
 # {{ b.pair }} — session brief, {{ b.asof.strftime("%a %d %b %Y %H:%M") }} UTC
 **State:** `{{ b.template }}` · {{ p.hours_elapsed }}h into the trading day (rolls 17:00 New York), {{ p.hours_left }}h left · last {{ "%.5g" | format(p.last) }}{% if b.stale %} · ⚠️ **bars are {{ b.data_age_h }}h old: this is not the current state**{% endif %}
 
 
+{% if b.bars_note %}
+_Bars: {{ b.bars_note }}. Levels from a second feed can differ from the main one by a pip or so._
+
+{% endif %}
 {% if b.template == "event_ahead" %}
 **Read:** {{ b.events_today }} high-impact release{{ "s" if b.events_today != 1 }} for {{ b.base }} or {{ b.quote }} before the roll. The rates below come from all days; on release days ranges break more often, so do not treat either extreme as set until the release has passed.
 {% elif b.template == "range_spent" %}
@@ -15,16 +20,16 @@
 {% endif %}
 
 ## Today's range
-|  | level | status | how often it held from a state like this | same state on a random walk |
-|---|---:|---|---|---|
-| Day low | {{ "%.5g" | format(p.low) }} | **{{ b.low_verdict }}** ({{ p.low_hold.age_h }}h old) | {{ rate(p.low_hold) }} | {{ nullcell(p.low_hold) }} |
-| Day high | {{ "%.5g" | format(p.high) }} | **{{ b.high_verdict }}** ({{ p.high_hold.age_h }}h old) | {{ rate(p.high_hold) }} | {{ nullcell(p.high_hold) }} |
+|  | level | status | how often it held from a state like this | same state on a random walk | random walk with this pair's drift | tilt |
+|---|---:|---|---|---|---|---|
+| Day low | {{ "%.5g" | format(p.low) }} | **{{ b.low_verdict }}** ({{ p.low_hold.age_h }}h old) | {{ rate(p.low_hold) }} | {{ nullcell(p.low_hold) }} | {{ driftcell(p.low_hold) }} | {{ p.low_hold.tilt }} |
+| Day high | {{ "%.5g" | format(p.high) }} | **{{ b.high_verdict }}** ({{ p.high_hold.age_h }}h old) | {{ rate(p.high_hold) }} | {{ nullcell(p.high_hold) }} | {{ driftcell(p.high_hold) }} | {{ p.high_hold.tilt }} |
 
 - Expected range today: {{ "%.5g" | format(p.expected_range) }} (from the {{ p.expected_from }}); ADR20 {{ "%.5g" | format(p.adr20) }}; travelled so far {{ "%.5g" | format(p.range_so_far) }}.
 - If the low holds, a full expected range puts the high near **{{ "%.5g" | format(p.high_if_low_holds) }}**. If the high holds, the low near **{{ "%.5g" | format(p.low_if_high_holds) }}**.
 - Matched on: low — {{ p.low_hold.matched_on }}; high — {{ p.high_hold.matched_on }}.
 
-_"Likely in" needs a hold rate of 70% or more, at least 5 points above the plain rate for this hour, and 60 or more distinct weeks behind it. These are frequencies from {{ p.history_days }} past days of this pair, not a tested signal. The last column is the same state on this pair's own bars with direction randomised: an extreme that is old, with most of the range used, holds often by arithmetic alone. "Same as a random walk" means the probability is real and usable for sizing a target, but the market is adding nothing to it; "above" or "below" is where there may be something to research._
+_"Likely in" needs a hold rate of 70% or more, at least 5 points above the plain rate for this hour, and 60 or more distinct weeks behind it. These are frequencies from {{ p.history_days }} past days of this pair, not a tested signal. The last column is the same state on this pair's own bars with direction randomised: an extreme that is old, with most of the range used, holds often by arithmetic alone. "Same as a random walk" means the probability is real and usable for sizing a target, but the market is adding nothing to it; "above" or "below" is where there may be something to research. The drift column keeps the pair's long-run trend in the walk: a rate outside the plain band but inside the drift band is just that trend._
 
 **Which session sets the day's extremes** (share of days)
 {{ p.sessions | md }}
