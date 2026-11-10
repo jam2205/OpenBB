@@ -49,8 +49,13 @@ def train(df: pd.DataFrame, out_dir: str, base: str = "answerdotai/ModernBERT-la
     """Standard BERT-style fine-tune. Returns eval metrics. Saves model + tokenizer to out_dir."""
     import torch
     from datasets import Dataset
-    from transformers import (AutoModelForSequenceClassification, AutoTokenizer,
-                              DataCollatorWithPadding, Trainer, TrainingArguments)
+    from transformers import (
+        AutoModelForSequenceClassification,
+        AutoTokenizer,
+        DataCollatorWithPadding,
+        Trainer,
+        TrainingArguments,
+    )
 
     from .nlp import modernbert_kwargs
 

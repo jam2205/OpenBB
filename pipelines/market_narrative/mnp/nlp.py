@@ -55,7 +55,11 @@ class NLP:
 
     # ---------- loaders ----------
     def _clf(self, model_id: str, max_length: int):
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+        from transformers import (
+            AutoModelForSequenceClassification,
+            AutoTokenizer,
+            pipeline,
+        )
 
         kw = modernbert_kwargs(self.device) if "modern" in str(model_id).lower() or Path(str(model_id)).exists() else {}
         try:

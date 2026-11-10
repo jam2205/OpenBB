@@ -146,7 +146,8 @@ def sight_deposits(asof: date) -> pd.DataFrame:
 
 def fx_transactions(n: int = 6) -> pd.DataFrame:
     """SNB FX transactions per quarter, CHF bn. Positive = foreign currency bought (franc sold).
-    Published with a lag of about one quarter."""
+    Published with a lag of about one quarter.
+    """
     df = cube("snbfxtr")
     df = df[df["d0"] == "T0"].sort_values("date").tail(n)
     t = pd.DataFrame({"quarter": df["date"].dt.to_period("Q").astype(str), "fx_purchases_chf_bn": (df["value"] / 1000).round(2)})
@@ -222,7 +223,8 @@ def global_policy_rates() -> pd.DataFrame:
 
 def block(asof: date) -> dict:
     """Everything for the report's Switzerland section. Each part is independent: a failure in
-    one is logged and leaves that table empty."""
+    one is logged and leaves that table empty.
+    """
     parts = {"policy": lambda: policy(asof), "sight": lambda: sight_deposits(asof), "fx_tx": fx_transactions,
              "curve": lambda: confederation_curve(asof), "eff_fx": lambda: effective_fx(asof),
              "reserves": reserves_allocation, "global_rates": global_policy_rates}
