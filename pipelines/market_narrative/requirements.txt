@@ -11,3 +11,6 @@ minio
 joblib
 tabulate
 markdown
+datasets        # only for mnp.finetune
+accelerate      # only for mnp.finetune
+# flash-attn    # optional, Ampere+ GPUs (A100/L4); skip on T4

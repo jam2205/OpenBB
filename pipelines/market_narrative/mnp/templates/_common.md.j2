@@ -5,7 +5,7 @@
 {% endmacro %}
 
 {% macro drivers_block() %}
-## News drivers (FinBERT tone × ModernBERT attribution)
+## News drivers (FinBERT tone × {{ driver_method }} attribution)
 {{ driver_summary | md }}
 
 **Dominant driver:** `{{ dominant_driver }}` (net tone {{ "%+.2f" | format(dominant_tone) }})

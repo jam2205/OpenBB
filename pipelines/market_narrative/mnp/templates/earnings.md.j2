@@ -14,6 +14,18 @@
 **Last 4 quarters (income)**
 {{ f.income | md }}
 
+{% if f.doc_tone %}
+**Management language**
+| Document | Net tone | % negative chunks | Chunks | Method |
+|---|---:|---:|---:|---|
+{% for name, d in f.doc_tone.items() %}
+| {{ name }} | {{ "%+.2f" | format(d.net_tone) if d.net_tone == d.net_tone else "n/a" }} | {{ "%.0f%%" | format(100 * d.pct_negative) if d.pct_negative is defined else "n/a" }} | {{ d.chunks }} | {{ d.method }} |
+{% endfor %}
+{% for name, d in f.doc_tone.items() if d.most_negative is defined %}
+- *{{ name }}, most cautious passage:* "{{ d.most_negative }}…"
+{% endfor %}
+{% endif %}
+
 {% endfor %}
 {{ c.drivers_block() }}
 {{ c.cross_asset_block() }}

@@ -56,12 +56,13 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
     # 3. NLP over news
     driver_summary = pd.DataFrame()
     scored = pd.DataFrame()
+    nlp = None
     if use_nlp:
         from .nlp import NLP
 
         nlp = NLP({**cfg["models"]})
         news = sources.news(u["equities"], ob["news_provider"])
-        scored = nlp.attribute_drivers(news, cfg["drivers"])
+        scored = nlp.attribute_drivers(news, cfg["drivers"], cfg.get("zero_shot_threshold", 0.35))
         driver_summary = NLP.driver_summary(scored)
     dom = driver_summary.iloc[0] if not driver_summary.empty else None
     top = []
@@ -92,6 +93,10 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
     funds = {}
     if regime["name"] == "earnings_week":
         funds = {s: sources.fundamentals(s, ob["price_provider"]) for s in regime["reporters"]}
+        for s, f in funds.items():
+            docs = sources.documents(s, ob.get("documents_provider", "fmp"))
+            f["doc_tone"] = {k: (nlp.document_tone(v) if nlp else {"net_tone": float("nan"), "chunks": 0, "method": "nlp off"})
+                             for k, v in docs.items()}
     earnings_tone = float(driver_summary.set_index("driver").net_tone.get("earnings", 0.0)) if not driver_summary.empty else 0.0
 
     # 6. Predictive model
@@ -112,7 +117,8 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         driver_summary=driver_summary,
         dominant_driver=dom.driver if dom is not None else "n/a",
         dominant_tone=float(dom.net_tone) if dom is not None else 0.0,
-        top_headlines=top, fundamentals=funds, earnings_tone=earnings_tone,
+        top_headlines=top,
+        driver_method=scored["driver_method"].iloc[0] if not scored.empty else "n/a", fundamentals=funds, earnings_tone=earnings_tone,
         y10_move=y10_move, rates=rates, curve_2s10s=curve, gold_y10=gold_y10,
         predictions=predictions, model_note=model_note,
     )

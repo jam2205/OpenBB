@@ -1,7 +1,13 @@
 # Market Narrative Pipeline config. Edit freely; nothing here is hard-coded in code.
 models:
-  sentiment: yiyanghkust/finbert-tone          # news/transcript tone (Positive/Negative/Neutral)
-  embedder: answerdotai/ModernBERT-large       # 8k-context embeddings: driver matching, transcript chunks
+  sentiment: yiyanghkust/finbert-tone                    # pre-trained financial tone (pos/neg/neutral)
+  zero_shot: MoritzLaurer/ModernBERT-large-zeroshot-v2.0 # pre-trained label-anything classifier -> drivers
+  embedder: nomic-ai/modernbert-embed-base               # pre-trained 8k-context embeddings (similarity / search)
+  embed_prefix: "classification: "                       # nomic task prefix; use "search_query: "/"search_document: " for retrieval
+  base: answerdotai/ModernBERT-large                     # only used by mnp.finetune (optional upgrade)
+  tone_head: heads/tone        # optional: fine-tuned ModernBERT tone head; used if the folder exists
+  driver_head: heads/driver    # optional: fine-tuned driver head; used if the folder exists
+  max_length: 8192
   predictive: AcyLa/multi-asset-predictive-model
   device: auto                                 # auto | cpu | cuda
 
@@ -19,6 +25,7 @@ universe:
 openbb:
   price_provider: yfinance
   news_provider: yfinance            # swap to benzinga/fmp/tiingo if you have keys
+  documents_provider: fmp            # transcripts + MD&A (FMP key)
   earnings_provider: fmp             # needs FMP key; pipeline degrades gracefully without it
   econ_calendar_provider: fmp
 
@@ -45,11 +52,21 @@ regimes:
   - name: default
     template: default.md.j2
 
-# Driver lexicon: news headlines are matched to drivers via ModernBERT similarity to these anchors.
+# Drivers: name -> short label the zero-shot model scores ("This news is about {label}.").
 drivers:
-  rates:      "Federal Reserve interest rate decision, Treasury yields, bond market selloff"
-  inflation:  "CPI inflation report, consumer prices, PCE price index"
-  earnings:   "quarterly earnings results, revenue guidance, EPS beat or miss"
-  geopolitics: "war, sanctions, tariffs, geopolitical tension, trade policy"
-  metals:     "gold price, safe haven demand, silver, copper, central bank gold buying"
-  fx:         "dollar strength, currency intervention, yen, euro exchange rate"
+  rates:       "interest rates and bond yields"
+  inflation:   "inflation and consumer prices"
+  earnings:    "company earnings and guidance"
+  geopolitics: "geopolitics, war, sanctions or tariffs"
+  metals:      "gold, silver or copper prices"
+  fx:          "currencies and the US dollar"
+zero_shot_threshold: 0.35    # below this top score a headline is tagged "other"
+
+# Only used to weak-label data for the optional fine-tune (mnp.finetune driver).
+driver_keywords:
+  rates:       [Fed, FOMC, Treasury, yield, rate hike, rate cut, Powell, bond]
+  inflation:   [CPI, PCE, inflation, consumer prices, PPI]
+  earnings:    [earnings, EPS, revenue, guidance, quarterly results]
+  geopolitics: [war, sanction, tariff, missile, election, trade war]
+  metals:      [gold, silver, copper, bullion, precious metal]
+  fx:          [dollar, yen, euro, currency, forex, intervention]

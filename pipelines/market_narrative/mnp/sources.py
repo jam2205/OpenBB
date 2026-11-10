@@ -105,6 +105,17 @@ def fundamentals(symbol: str, provider: str = "yfinance") -> dict[str, pd.DataFr
     }
 
 
+def documents(symbol: str, provider: str = "fmp") -> dict[str, str]:
+    """Latest earnings-call transcript and MD&A text (empty strings if unavailable)."""
+    obb = _obb()
+    out = {}
+    for name, fn in (("transcript", obb.equity.fundamental.transcript),
+                     ("mdna", obb.equity.fundamental.management_discussion_analysis)):
+        df = _safe(fn, symbol=symbol, provider=provider)
+        out[name] = str(df["content"].iloc[-1]) if not df.empty and "content" in df else ""
+    return out
+
+
 def window(today: date | None = None, ahead: int = 7) -> tuple[date, date]:
     today = today or date.today()
     return today, today + timedelta(days=ahead)

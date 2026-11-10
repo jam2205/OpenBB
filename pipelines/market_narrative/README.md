@@ -40,9 +40,19 @@ python -m mnp.run --out reports            # add --no-nlp / --no-model to skip h
   ONNX, or torch weights. Its input features are not yet known, so the report shows a
   "not wired" note until `predict()` matches the model card. Loading a pickle runs code, so
   only load it from a repo you trust.
-- **ModernBERT-large** is a base encoder, not one tuned for sentence similarity. Driver attribution
-  ranks headlines well, but the similarity scores are not calibrated. Fine-tune it later on labelled
-  headlines for sharper attribution.
+- **Models (all pre-trained, no training needed):**
+  | Job | Model |
+  |---|---|
+  | News / document tone | `yiyanghkust/finbert-tone` |
+  | Headline → driver | `MoritzLaurer/ModernBERT-large-zeroshot-v2.0` (zero-shot; edit labels in `config.yaml → drivers`) |
+  | Embeddings / long-doc search | `nomic-ai/modernbert-embed-base` (8k context, needs the task prefix) |
+
+  Optional upgrade: `mnp.finetune` trains `answerdotai/ModernBERT-large` heads (raw MLM, per its
+  model card it must be fine-tuned) into `heads/tone` and `heads/driver`. When those folders
+  exist they override the defaults.
+- **Earnings weeks** add management-language tone for the latest call transcript and MD&A
+  (FMP). Each document is scored chunk by chunk, and the report quotes the most cautious passage.
+- **Flash Attention 2** is used automatically on Ampere+ GPUs if `flash-attn` is installed. On a T4 it falls back to fp16.
 - **Missing provider keys** (FMP, Benzinga) don't break a run. Those sections come out empty and
   regime detection falls back to `default`.
 - **Units:** yfinance `^TNX` is in percent and Fed `treasury_rates` is in decimals. Yield
