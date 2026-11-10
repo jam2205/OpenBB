@@ -1,0 +1,55 @@
+# Market Narrative Pipeline config. Edit freely; nothing here is hard-coded in code.
+models:
+  sentiment: yiyanghkust/finbert-tone          # news/transcript tone (Positive/Negative/Neutral)
+  embedder: answerdotai/ModernBERT-large       # 8k-context embeddings: driver matching, transcript chunks
+  predictive: AcyLa/multi-asset-predictive-model
+  device: auto                                 # auto | cpu | cuda
+
+lookback_days: 180
+corr_window: 20            # rolling correlation window (trading days)
+
+# Focus assets get a full section. Peers feed the cross-asset / correlation block.
+universe:
+  equities: [SPY, QQQ, AAPL, NVDA]
+  metals:   {GC=F: Gold, SI=F: Silver, HG=F: Copper}
+  bonds:    {^TNX: US10Y yield, ^FVX: US5Y yield, TLT: 20Y+ Treasury ETF}
+  fx_openbb: [EURUSD, USDJPY]        # pulled via obb.currency.price.historical
+  fx_minio:  []                      # pairs OpenBB doesn't cover -> loaded from MinIO, e.g. [USDNGN, USDKES]
+
+openbb:
+  price_provider: yfinance
+  news_provider: yfinance            # swap to benzinga/fmp/tiingo if you have keys
+  earnings_provider: fmp             # needs FMP key; pipeline degrades gracefully without it
+  econ_calendar_provider: fmp
+
+minio:
+  endpoint_env: MINIO_ENDPOINT       # values read from env / Colab secrets, never stored here
+  access_key_env: MINIO_ACCESS_KEY
+  secret_key_env: MINIO_SECRET_KEY
+  secure: true
+  bucket: fx-data
+  # object path per pair; {pair} is substituted. Expect columns: date, close (open/high/low optional)
+  object_pattern: "daily/{pair}.parquet"
+
+# Regime = which "cookie cutter" template is used this week. First match wins (priority order).
+regimes:
+  - name: central_bank
+    template: macro.md.j2
+    econ_keywords: [FOMC, Fed Interest Rate Decision, ECB, BoJ, BoE]
+  - name: bond_week
+    template: macro.md.j2
+    econ_keywords: [CPI, PCE, Nonfarm Payrolls, Treasury, Auction, GDP]
+  - name: earnings_week
+    template: earnings.md.j2
+    min_focus_reporters: 1           # >=1 focus equity reports in the window
+  - name: default
+    template: default.md.j2
+
+# Driver lexicon: news headlines are matched to drivers via ModernBERT similarity to these anchors.
+drivers:
+  rates:      "Federal Reserve interest rate decision, Treasury yields, bond market selloff"
+  inflation:  "CPI inflation report, consumer prices, PCE price index"
+  earnings:   "quarterly earnings results, revenue guidance, EPS beat or miss"
+  geopolitics: "war, sanctions, tariffs, geopolitical tension, trade policy"
+  metals:     "gold price, safe haven demand, silver, copper, central bank gold buying"
+  fx:         "dollar strength, currency intervention, yen, euro exchange rate"

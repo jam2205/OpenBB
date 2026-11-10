@@ -1,0 +1,37 @@
+{% macro header(title) %}
+# {{ title }} — {{ asof }}
+**Regime:** `{{ regime.name }}`{% if regime.events %} · **Catalysts:** {{ regime.events | join(", ") }}{% endif %}
+
+{% endmacro %}
+
+{% macro drivers_block() %}
+## News drivers (FinBERT tone × ModernBERT attribution)
+{{ driver_summary | md }}
+
+**Dominant driver:** `{{ dominant_driver }}` (net tone {{ "%+.2f" | format(dominant_tone) }})
+
+Top headlines for the dominant driver:
+{% for h in top_headlines %}
+- [{{ h.tone }}] {{ h.title }}
+{% endfor %}
+{% endmacro %}
+
+{% macro cross_asset_block() %}
+## Cross-asset snapshot
+{{ snapshot | md }}
+
+### Correlation shifts vs `{{ anchor }}` (recent {{ corr_window }}d vs full sample)
+{{ corr_shift | md }}
+{% if corr_flags %}
+⚠️ Regime breaks: {{ corr_flags | join(", ") }} — relationships to `{{ anchor }}` have moved > 0.3.
+{% endif %}
+{% endmacro %}
+
+{% macro model_block() %}
+## Predictive model
+{% if predictions is not none %}
+{{ predictions | md }}
+{% else %}
+_{{ model_note }}_
+{% endif %}
+{% endmacro %}

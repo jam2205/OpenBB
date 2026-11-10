@@ -1,0 +1,24 @@
+{% import "_common.md.j2" as c with context %}
+{{ c.header("Earnings Week Brief") }}
+## Reporters in focus
+{{ regime.reporters | join(", ") or "_none from focus list_" }}
+
+{% for sym, f in fundamentals.items() %}
+### {{ sym }}
+**Key metrics**
+{{ f.metrics | md }}
+
+**Consensus**
+{{ f.estimates | md }}
+
+**Last 4 quarters (income)**
+{{ f.income | md }}
+
+{% endfor %}
+{{ c.drivers_block() }}
+{{ c.cross_asset_block() }}
+## What to watch
+- Reaction asymmetry: net news tone into the print is {{ "%+.2f" | format(earnings_tone) }}; a beat against negative tone has more room to rerate than a beat already priced in by positive tone.
+- Index spillover: check the correlation of reporters to `{{ anchor }}` above. A high recent correlation means the print moves the index.
+- Rates sensitivity: the 10Y move this week is {{ y10_move }}. Long-duration names react more to yields than to the earnings number itself.
+{{ c.model_block() }}
