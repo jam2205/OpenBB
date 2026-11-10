@@ -12,7 +12,7 @@ def _event_col(df: pd.DataFrame) -> str | None:
     return None
 
 
-def detect(cfg: dict, econ: pd.DataFrame, earnings: pd.DataFrame) -> dict:
+def detect(cfg: dict, econ: pd.DataFrame, earnings: pd.DataFrame, window: tuple | None = None) -> dict:
     """Return {'name', 'template', 'events': [...], 'reporters': [...]} for the upcoming window."""
     focus = set(cfg["universe"]["equities"])
     reporters: list[str] = []
@@ -25,8 +25,13 @@ def detect(cfg: dict, econ: pd.DataFrame, earnings: pd.DataFrame) -> dict:
     matches = []
     for rule in cfg["regimes"]:
         kws = rule.get("econ_keywords")
-        if kws:
-            hits = [e for e in events_all if any(k.lower() in e.lower() for k in kws)]
+        if kws or rule.get("dates"):
+            hits = [e for e in events_all if any(k.lower() in e.lower() for k in (kws or []))]
+            # Explicit dated events (e.g. central-bank decisions): {"2026-12-09": "FOMC decision"}
+            if window and rule.get("dates"):
+                for d, label in rule["dates"].items():
+                    if window[0] <= pd.Timestamp(str(d)).date() <= window[1]:
+                        hits.append(f"{label} ({d})")
             if hits:
                 matches.append({**rule, "events": sorted(set(hits))[:15]})
         elif "min_focus_reporters" in rule:
@@ -37,7 +42,7 @@ def detect(cfg: dict, econ: pd.DataFrame, earnings: pd.DataFrame) -> dict:
     if not matches:
         raise ValueError("config.regimes must end with a default rule")
     primary = matches[0]
-    others = [m for m in matches[1:] if "econ_keywords" in m or "min_focus_reporters" in m]
+    others = [m for m in matches[1:] if "econ_keywords" in m or "dates" in m or "min_focus_reporters" in m]
     # Carry the other active week types and all their catalysts so nothing is hidden by priority.
     events = list(primary["events"])
     for m in others:

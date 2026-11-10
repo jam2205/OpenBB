@@ -40,7 +40,7 @@ def _rates_section(asof):
     if not rates.empty and {"year_2", "year_10"} <= set(rates.columns):
         last = rates.iloc[-1]
         curve = _fmt_bp((last["year_10"] - last["year_2"]) * 100)  # provider returns decimals
-        rates = rates[[c for c in ("month_3", "year_2", "year_5", "year_10", "year_30") if c in rates]].tail(5)
+        rates = (rates[[c for c in ("month_3", "year_2", "year_5", "year_10", "year_30") if c in rates]].tail(5) * 100).round(2)
     return rates, curve
 
 
@@ -124,7 +124,7 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
     econ = sources.econ_calendar(w0, w1, ob.get("econ_calendar_providers", ["fred_rest", "treasury_auctions"]),
                                  ob.get("auction_terms"))
     earn = sources.earnings_calendar(w0, w1, ob["earnings_provider"])
-    regime = _guard("regime", lambda: rg.detect(cfg, econ, earn),
+    regime = _guard("regime", lambda: rg.detect(cfg, econ, earn, (w0, w1)),
                     {**cfg["regimes"][-1], "events": [], "reporters": [], "also": []})
     log.info("Regime: %s", regime["name"])
 

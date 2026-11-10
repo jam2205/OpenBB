@@ -40,7 +40,7 @@ openbb:
   earnings_provider: fmp             # needs FMP key; pipeline degrades gracefully without it
   # fred_rest = FRED API releases/dates (your FRED key, one call). treasury_auctions = FiscalData (no key).
   # fmp / tradingeconomics = OpenBB providers that need a paid plan; add them here if you upgrade.
-  econ_calendar_providers: [fred_rest, treasury_auctions]
+  econ_calendar_providers: [fred_rest, treasury_auctions]   # treasury_auctions source can lag by weeks
   auction_terms: [10-Year, 20-Year, 30-Year]   # which coupon auctions make it a "bond week"
 
 minio:
@@ -68,13 +68,27 @@ fred:
 imf:
   countries: [USA, JPN, DEU, GBR, CHN, NGA, KEN]
   indicators: []
-  chokepoints: [suez_canal, panama_canal, strait_of_hormuz, bab_el-mandeb_strait, malacca_strait]
+  # IMF PortWatch's public server now answers "Token Required" (verified 2026-11-10), so this is off.
+  # To retry later: [suez_canal, panama_canal, strait_of_hormuz, bab_el-mandeb_strait, malacca_strait]
+  chokepoints: []
 
 # Regime = which "cookie cutter" template is used this week. First match wins (priority order).
 regimes:
   - name: central_bank
     template: macro.md.j2
-    econ_keywords: [FOMC, Fed Interest Rate Decision, Monetary policy meeting]
+    econ_keywords: [Fed Interest Rate Decision, Monetary policy meeting]   # for paid calendars (FMP etc.)
+    # Decision days. FRED's calendar cannot be used for this: it lists "FOMC Press Release" every
+    # day. FOMC 2026 from the Fed's published schedule -- verify at federalreserve.gov and add
+    # 2027 plus the ECB / BoJ / BoE / SNB / RBNZ dates you trade around.
+    dates:
+      "2026-01-28": FOMC decision
+      "2026-03-18": FOMC decision
+      "2026-04-29": FOMC decision
+      "2026-06-17": FOMC decision
+      "2026-07-29": FOMC decision
+      "2026-09-16": FOMC decision
+      "2026-10-28": FOMC decision
+      "2026-12-09": FOMC decision
   - name: bond_week
     template: macro.md.j2
     # Matched against FRED release names and "Treasury Auction: <term> <type>" events.

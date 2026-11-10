@@ -55,7 +55,7 @@ def fred_key() -> str | None:
     return key or None
 
 
-def fred_release_calendar(start: date, end: date, api_key: str | None = None) -> pd.DataFrame:
+def fred_release_calendar(start: date, end: date, api_key: str | None = None, max_days: int = 2) -> pd.DataFrame:
     """Scheduled FRED releases between start and end: columns date, event, release_id."""
     api_key = api_key or fred_key()
     if not api_key:
@@ -83,6 +83,11 @@ def fred_release_calendar(start: date, end: date, api_key: str | None = None) ->
     df = pd.DataFrame(rows).rename(columns={"release_name": "event"})
     df["date"] = pd.to_datetime(df["date"])
     df = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)]
+    # FRED lists a "release date" every day for releases that hold daily series (e.g. the fed funds
+    # target lives under "FOMC Press Release"). Those are not events: keep only releases that
+    # appear on at most `max_days` distinct days in the window.
+    days = df.groupby("event")["date"].transform("nunique")
+    df = df[days <= max_days]
     return df[["date", "event", "release_id"]].assign(country="US").reset_index(drop=True)
 
 
@@ -101,7 +106,12 @@ def treasury_auctions(start: date, end: date, terms: list[str] | None = None) ->
     df = pd.DataFrame(data.get("data", []))
     if df.empty or "auction_date" not in df:
         return pd.DataFrame()
-    df = df[df["record_date"] == df["record_date"].max()].copy()
+    latest = pd.to_datetime(df["record_date"]).max()
+    if (pd.Timestamp(start) - latest).days > 7:
+        # Verified 2026-11-10: this dataset can run weeks behind, so "upcoming" may be empty.
+        log.warning("treasury auctions: FiscalData snapshot is stale (latest %s); no auction events this run",
+                    latest.date())
+    df = df[pd.to_datetime(df["record_date"]) == latest].copy()
     df["date"] = pd.to_datetime(df["auction_date"], errors="coerce")
     df = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)]
     term = df["security_term"].astype(str) if "security_term" in df else pd.Series("", index=df.index)
