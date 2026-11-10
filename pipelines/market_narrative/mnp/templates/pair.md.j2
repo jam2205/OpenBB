@@ -9,7 +9,9 @@
 _Bars: {{ b.bars_note }}. Levels from a second feed can differ from the main one by a pip or so._
 
 {% endif %}
-{% if b.template == "event_ahead" %}
+{% if b.template == "day_closed" %}
+**Read:** this trading day has closed, so the low and high below are final and the 100% rates say nothing. The brief becomes useful again a few hours into the new day.
+{% elif b.template == "event_ahead" %}
 **Read:** {{ b.events_today }} high-impact release{{ "s" if b.events_today != 1 }} for {{ b.base }} or {{ b.quote }} before the roll. The rates below come from all days; on release days ranges break more often, so do not treat either extreme as set until the release has passed.
 {% elif b.template == "range_spent" %}
 **Read:** the day has already travelled {{ "%.0f%%" | format(100 * p.used_of_expected) }} of its expected range. Further extension is the less common outcome; the question is which extreme stands.

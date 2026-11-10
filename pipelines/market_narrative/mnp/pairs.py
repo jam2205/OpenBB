@@ -29,6 +29,8 @@ _YIELD_CC = {"USD": "US", "EUR": "DE", "JPY": "JP", "GBP": "GB", "CHF": "CH", "A
 
 def _template(p: dict, events_today: pd.DataFrame) -> str:
     """Which "cookie cutter" this pair gets right now. First match wins."""
+    if p.get("hours_left", 1) <= 0:
+        return "day_closed"             # the last hour is in: the extremes are final by definition
     if not events_today.empty:
         return "event_ahead"            # a high-impact release before the roll: ranges break more often
     if p.get("used_of_expected", 0) >= 1.0:
@@ -166,6 +168,10 @@ def brief(pair: str, now: pd.Timestamp | None = None, cfg: dict | None = None, s
     cot = cot if not cot.empty and pair in cot.index else pd.DataFrame()
     reg = medallion.regime(pair, now)
     lv, hv = profile.verdict(p["low_hold"]), profile.verdict(p["high_hold"])
+    if p["hours_left"] <= 0:            # a 100% "hold rate" here is arithmetic, not information
+        lv = hv = "final (day closed)"
+        for sd in (p["low_hold"], p["high_hold"]):
+            sd["tilt"] = sd["vs_null"] = sd["vs_drift"] = "n/a (day closed)"
     return {
         "pair": pair, "base": base, "quote": quote, "bars_note": note, "asof": p["asof"], "data_age_h": round(age_h, 1), "stale": age_h > float(pcfg.get("max_age_h", 3)),
         "template": _template(p, today), "day": p, "week": w, "low_verdict": lv, "high_verdict": hv, "forecast": fc,
