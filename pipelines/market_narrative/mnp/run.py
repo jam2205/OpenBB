@@ -117,21 +117,19 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
     choke_tbl = pd.DataFrame()
     if not choke.empty and "chokepoint" in choke:
         num = choke.select_dtypes("number").columns
-        col = next((c for c in ("vessels_total", "capacity_total", "transit_total") if c in num), num[0] if len(num) else None)
-        if col:
-            choke = choke.reset_index()
-            date_col = "date" if "date" in choke else choke.columns[0]
-            piv = choke.pivot_table(index=date_col, columns="chokepoint", values=col).sort_index()
+        col = next((c for c in ("vessels_total", "capacity_total") if c in num), num[0] if len(num) else None)
+        if col and "date" in choke:
+            piv = choke.pivot_table(index="date", columns="chokepoint", values=col).sort_index()
             choke_tbl = pd.DataFrame({"last_7d_avg": piv.tail(7).mean(), "prior_90d_avg": piv.mean()})
-            choke_tbl["vs_90d"] = choke_tbl["last_7d_avg"] / choke_tbl["prior_90d_avg"] - 1
-            choke_tbl.attrs["metric"] = col
+            choke_tbl["vs_90d_pct"] = (choke_tbl["last_7d_avg"] / choke_tbl["prior_90d_avg"] - 1) * 100
+            choke_tbl = choke_tbl.round(1)
 
     # 5. Fundamentals for reporters (earnings regime)
     funds = {}
     if regime["name"] == "earnings_week":
         funds = {s: sources.fundamentals(s, ob["price_provider"]) for s in regime["reporters"]}
         for s, f in funds.items():
-            docs = sources.documents(s, ob.get("documents_provider", "fmp"))
+            docs = sources.documents(s, ob.get("transcript_provider", "fmp"), ob.get("mdna_provider", "sec"))
             f["doc_tone"] = {k: (nlp.document_tone(v) if nlp else {"net_tone": float("nan"), "chunks": 0, "method": "nlp off"})
                              for k, v in docs.items()}
     earnings_tone = float(driver_summary.set_index("driver").net_tone.get("earnings", 0.0)) if not driver_summary.empty else 0.0
@@ -154,7 +152,7 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
 
     ctx = dict(
         asof=asof.isoformat(), regime=regime, anchor=anchor, corr_window=cfg["corr_window"],
-        snapshot=corr.snapshot(prices, rets), corr_shift=shift,
+        snapshot=corr.snapshot(prices, rets, yield_cols), corr_shift=shift,
         corr_flags=shift.index[shift["flag"]].tolist() if not shift.empty else [],
         driver_summary=driver_summary,
         dominant_driver=dom.driver if dom is not None else "n/a",

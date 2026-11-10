@@ -35,9 +35,10 @@ universe:
 openbb:
   price_provider: yfinance
   news_provider: yfinance            # swap to benzinga/fmp/tiingo if you have keys
-  documents_provider: fmp            # transcripts + MD&A (FMP key)
+  transcript_provider: fmp           # earnings-call transcripts: FMP paid plans only (402 on free/starter)
+  mdna_provider: sec                 # MD&A from SEC filings, free, no key
   earnings_provider: fmp             # needs FMP key; pipeline degrades gracefully without it
-  econ_calendar_providers: [fred, ecb, fmp]   # union of all that respond; FRED key covers US, ECB needs no key
+  econ_calendar_providers: [fred, fmp]   # union of all that respond. FMP's needs a paid plan; FRED's is free with a key
 
 minio:
   endpoint_env: MINIO_ENDPOINT       # values read from env / Colab secrets, never stored here
@@ -64,7 +65,7 @@ fred:
 imf:
   countries: [USA, JPN, DEU, GBR, CHN, NGA, KEN]
   indicators: []
-  chokepoints: [suez_canal, panama_canal, strait_of_hormuz, bab_el_mandeb_strait, malacca_strait]
+  chokepoints: [suez_canal, panama_canal, strait_of_hormuz, bab_el-mandeb_strait, malacca_strait]
 
 # Regime = which "cookie cutter" template is used this week. First match wins (priority order).
 regimes:

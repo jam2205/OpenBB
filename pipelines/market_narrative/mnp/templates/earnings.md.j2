@@ -11,7 +11,7 @@
 **Consensus**
 {{ f.estimates | md }}
 
-**Last 4 quarters (income)**
+**Last quarters (income, USD bn)**
 {{ f.income | md }}
 
 {% if f.doc_tone %}
@@ -33,4 +33,5 @@
 - Reaction asymmetry: net news tone into the print is {{ "%+.2f" | format(earnings_tone) }}; a beat against negative tone has more room to rerate than a beat already priced in by positive tone.
 - Index spillover: check the correlation of reporters to `{{ anchor }}` above. A high recent correlation means the print moves the index.
 - Rates sensitivity: the 10Y move this week is {{ y10_move }}. Long-duration names react more to yields than to the earnings number itself.
+{{ c.global_block() }}
 {{ c.model_block() }}

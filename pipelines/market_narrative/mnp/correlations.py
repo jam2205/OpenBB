@@ -16,14 +16,23 @@ def returns(prices: pd.DataFrame, yield_cols: list[str] | None = None) -> pd.Dat
     return r.dropna(how="all")
 
 
-def snapshot(prices: pd.DataFrame, rets: pd.DataFrame) -> pd.DataFrame:
-    last = prices.ffill().iloc[-1]
-    return pd.DataFrame({
-        "last": last,
-        "1w": prices.ffill().pct_change(5, fill_method=None).iloc[-1],
-        "1m": prices.ffill().pct_change(21, fill_method=None).iloc[-1],
+def snapshot(prices: pd.DataFrame, rets: pd.DataFrame, yield_cols: list[str] | None = None) -> pd.DataFrame:
+    """Level, 1w / 1m change and 20d annualised vol. Yield rows show changes in bp, vol in bp/yr."""
+    px = prices.ffill()
+    df = pd.DataFrame({
+        "last": px.iloc[-1],
+        "chg_1w": px.pct_change(5, fill_method=None).iloc[-1],
+        "chg_1m": px.pct_change(21, fill_method=None).iloc[-1],
         "vol_20d_ann": rets.tail(20).std() * np.sqrt(252),
     })
+    df["unit"] = "%"
+    for c in [c for c in (yield_cols or []) if c in px]:
+        df.loc[c, ["chg_1w", "chg_1m"]] = [px[c].diff(5).iloc[-1] * 100, px[c].diff(21).iloc[-1] * 100]
+        df.loc[c, "vol_20d_ann"] *= 100
+        df.loc[c, "unit"] = "bp"
+    pct = df["unit"] == "%"
+    df.loc[pct, ["chg_1w", "chg_1m", "vol_20d_ann"]] *= 100
+    return df.round(2)
 
 
 def corr_shift(rets: pd.DataFrame, anchor: str, window: int) -> pd.DataFrame:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 from datetime import date, timedelta
 
 import pandas as pd
@@ -12,21 +13,38 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 
+_SECRET = re.compile(r"(?i)(api_?key|token|secret|password)=[^&\s]+")
+
+
 def _obb():
     from openbb import obb  # imported lazily so the module loads without openbb installed
 
     obb.user.preferences.output_type = "dataframe"
+    try:
+        obb.user.preferences.request_timeout = 120  # FRED's release calendar is slow
+    except Exception:  # noqa: BLE001
+        pass
     return obb
 
 
-def _safe(fn, *a, **kw) -> pd.DataFrame:
-    """Call an OpenBB endpoint; return empty frame on failure (missing key, provider outage)."""
-    try:
-        df = fn(*a, **kw)
-        return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
-    except Exception as e:  # noqa: BLE001
-        log.warning("OpenBB call %s failed: %s", getattr(fn, "__name__", fn), e)
-        return pd.DataFrame()
+def _safe(fn, *a, retries: int = 1, **kw) -> pd.DataFrame:
+    """Call an OpenBB endpoint; return an empty frame on failure (missing key, plan limit, outage).
+
+    Retries timeouts once. Credentials are masked before anything is logged.
+    """
+    for attempt in range(retries + 1):
+        try:
+            df = fn(*a, **kw)
+            return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+        except Exception as e:  # noqa: BLE001
+            msg = _SECRET.sub(r"\1=***", str(e)).strip()
+            if "timeout" in msg.lower() and attempt < retries:
+                continue
+            first = next((ln for ln in msg.splitlines() if ln.strip()), msg)
+            log.warning("%s(provider=%s) unavailable: %s", getattr(fn, "__name__", "call"),
+                        kw.get("provider", "default"), first[:200])
+            return pd.DataFrame()
+    return pd.DataFrame()
 
 
 def closes(symbols: list[str], start: date, provider: str, kind: str = "equity") -> pd.DataFrame:
@@ -121,22 +139,44 @@ def fred(series: list[str], start: date) -> pd.DataFrame:
     return df
 
 
+_METRIC_COLS = ["market_cap", "pe_ratio", "forward_pe", "peg_ratio", "enterprise_to_ebitda", "earnings_growth",
+                "revenue_growth", "gross_margin", "operating_margin", "profit_margin", "return_on_equity",
+                "debt_to_equity", "beta"]
+_INCOME_COLS = ["total_revenue", "gross_profit", "operating_income", "net_income", "diluted_earnings_per_share"]
+
+
 def fundamentals(symbol: str, provider: str = "yfinance") -> dict[str, pd.DataFrame]:
     obb = _obb()
-    return {
-        "metrics": _safe(obb.equity.fundamental.metrics, symbol=symbol, provider=provider),
-        "income": _safe(obb.equity.fundamental.income, symbol=symbol, provider=provider, limit=4),
-        "estimates": _safe(obb.equity.estimates.consensus, symbol=symbol, provider=provider),
-    }
+    metrics = _safe(obb.equity.fundamental.metrics, symbol=symbol, provider=provider)
+    if not metrics.empty:
+        metrics = metrics[[c for c in _METRIC_COLS if c in metrics]].T.rename(columns=lambda _: symbol)
+        if "market_cap" in metrics.index:
+            metrics.loc["market_cap"] = metrics.loc["market_cap"] / 1e9
+            metrics = metrics.rename(index={"market_cap": "market_cap_bn"})
+    income = _safe(obb.equity.fundamental.income, symbol=symbol, provider=provider, period="quarter", limit=5)
+    if not income.empty:
+        idx = income["period_ending"] if "period_ending" in income else income.index
+        cols = [c for c in _INCOME_COLS if c in income]
+        income = income[cols].set_axis(pd.to_datetime(idx).astype(str), axis=0).sort_index()
+        for c in cols:
+            if c != "diluted_earnings_per_share":
+                income[c] = income[c] / 1e9
+        income = income.rename(columns=lambda c: c if c.endswith("per_share") else f"{c}_bn")
+        if "total_revenue_bn" in income:
+            income["revenue_qoq"] = income["total_revenue_bn"].pct_change()
+    est = _safe(obb.equity.estimates.consensus, symbol=symbol, provider=provider)
+    if not est.empty:
+        est = est.drop(columns=[c for c in ("symbol", "currency") if c in est]).T.rename(columns=lambda _: symbol)
+    return {"metrics": metrics, "income": income, "estimates": est}
 
 
-def documents(symbol: str, provider: str = "fmp") -> dict[str, str]:
-    """Latest earnings-call transcript and MD&A text (empty strings if unavailable)."""
+def documents(symbol: str, transcript_provider: str = "fmp", mdna_provider: str = "sec") -> dict[str, str]:
+    """Latest earnings-call transcript (FMP, paid plans) and MD&A text (SEC, free). "" if unavailable."""
     obb = _obb()
     out = {}
-    for name, fn in (("transcript", obb.equity.fundamental.transcript),
-                     ("mdna", obb.equity.fundamental.management_discussion_analysis)):
-        df = _safe(fn, symbol=symbol, provider=provider)
+    for name, fn, prov in (("transcript", obb.equity.fundamental.transcript, transcript_provider),
+                           ("mdna", obb.equity.fundamental.management_discussion_analysis, mdna_provider)):
+        df = _safe(fn, symbol=symbol, provider=prov)
         out[name] = str(df["content"].iloc[-1]) if not df.empty and "content" in df else ""
     return out
 
@@ -154,11 +194,22 @@ def imf_indicators(symbols: list[str], countries: list[str], start: date) -> pd.
 
 
 def chokepoints(names: list[str], start: date) -> pd.DataFrame:
-    """IMF PortWatch daily transit volumes through shipping chokepoints (oil / metals / geopolitics)."""
-    if not names:
-        return pd.DataFrame()
-    return _safe(_obb().economy.shipping.chokepoint_volume, provider="imf",
-                 chokepoint=",".join(names), start_date=start)
+    """IMF PortWatch daily transit volumes through shipping chokepoints (oil / metals / geopolitics).
+
+    Fetched one at a time so one bad name doesn't void the rest; `bab_el-mandeb_strait` is
+    spelled with a hyphen or an underscore depending on the installed openbb-imf release.
+    """
+    fn = _obb().economy.shipping.chokepoint_volume
+    frames = []
+    for n in names:
+        variants = [n] + ([n.replace("el_mandeb", "el-mandeb")] if "el_mandeb" in n else
+                          [n.replace("el-mandeb", "el_mandeb")] if "el-mandeb" in n else [])
+        for v in variants:
+            df = _safe(fn, provider="imf", chokepoint=v, start_date=start)
+            if not df.empty:
+                frames.append(df.reset_index())
+                break
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def window(today: date | None = None, ahead: int = 7) -> tuple[date, date]:

@@ -29,14 +29,14 @@ python -m mnp.run --out reports            # add --no-nlp / --no-model to skip h
 ## API keys
 | Key | Needed? | Unlocks |
 |---|---|---|
-| none: HuggingFace public models, yfinance, IMF, ECB, Federal Reserve | — | prices, company news, all NLP, AcyLa model, IMF macro + PortWatch, ECB calendar + EUR reference FX, Treasury curve |
+| none: HuggingFace public models, yfinance, IMF, ECB, Federal Reserve | — | prices, company news, all NLP, AcyLa model, IMF macro + PortWatch, EUR reference FX (ECB), SEC MD&A, Treasury curve |
 | `FRED_API_KEY` | **recommended** | US release calendar (bond/Fed week detection without FMP), real yields, breakevens, credit spreads, USD index, claims |
-| `FMP_API_KEY` | **recommended** | earnings + economic calendars (week detection), transcripts, MD&A |
+| `FMP_API_KEY` | **recommended** | earnings calendar (works on the basic plan). Economic calendar and transcripts need a higher FMP plan (HTTP 402 otherwise) |
 | `MINIO_*` (endpoint, access, secret) | for your extra FX pairs | daily FX not on yfinance |
 | `HF_TOKEN` | optional | higher HuggingFace download rate limits |
 | `BENZINGA_API_KEY` | optional | world/macro news feed |
 
-Calendars from FRED, ECB and FMP are merged. With FRED alone, bond and Fed weeks are still detected. Earnings weeks need FMP's earnings calendar, and FMP also supplies transcripts and MD&A. The notebook accepts common alternative secret names; see `ALIASES` in its second cell.
+Economic calendars from FRED and FMP are merged; FRED alone is enough to detect bond and Fed weeks. Earnings weeks use FMP's earnings calendar. MD&A text comes from SEC filings (free). Transcripts need a paid FMP plan and are skipped otherwise. API keys are masked in all log output. The notebook accepts common alternative secret names; see `ALIASES` in its second cell.
 In Colab, store keys under Secrets (🔑). The notebook copies them into the environment and OpenBB.
 
 ## Where to extend

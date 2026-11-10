@@ -19,6 +19,7 @@ Top headlines for the dominant driver:
 {% macro cross_asset_block() %}
 ## Cross-asset snapshot
 {{ snapshot | md }}
+_Changes and vol are in % for prices and in basis points for yields (see `unit`)._
 
 ### Correlation shifts vs `{{ anchor }}` (recent {{ corr_window }}d vs full sample)
 {{ corr_shift | md }}
