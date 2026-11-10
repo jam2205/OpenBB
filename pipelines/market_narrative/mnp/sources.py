@@ -118,14 +118,24 @@ def earnings_calendar(start: date, end: date, provider: str) -> pd.DataFrame:
     return _safe(_obb().equity.calendar.earnings, start_date=start, end_date=end, provider=provider)
 
 
-def econ_calendar(start: date, end: date, providers: list[str] | str) -> pd.DataFrame:
-    """Union of economic calendars (FRED: US releases, ECB: euro area, FMP: global)."""
+def econ_calendar(start: date, end: date, providers: list[str] | str,
+                  auction_terms: list[str] | None = None) -> pd.DataFrame:
+    """Union of calendars. `fred_rest` and `treasury_auctions` are direct REST (see rest.py);
+    any other name is an OpenBB `economy.calendar` provider (fmp, tradingeconomics)."""
+    from . import rest
+
     providers = [providers] if isinstance(providers, str) else providers
     frames = []
     for p in providers:
-        df = _safe(_obb().economy.calendar, start_date=start, end_date=end, provider=p)
+        if p == "fred_rest":
+            df = rest.fred_release_calendar(start, end)
+        elif p == "treasury_auctions":
+            df = rest.treasury_auctions(start, end, auction_terms)
+        else:
+            df = _safe(_obb().economy.calendar, start_date=start, end_date=end, provider=p)
+            df = df.reset_index() if not df.empty else df
         if not df.empty:
-            frames.append(df.reset_index().assign(calendar_source=p))
+            frames.append(df.assign(calendar_source=p))
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
@@ -205,9 +215,17 @@ def chokepoints(names: list[str], start: date) -> pd.DataFrame:
         variants = [n] + ([n.replace("el_mandeb", "el-mandeb")] if "el_mandeb" in n else
                           [n.replace("el-mandeb", "el_mandeb")] if "el-mandeb" in n else [])
         for v in variants:
+            # Some openbb-imf releases fail with KeyError 'features' when a date filter is passed,
+            # so fall back to the unfiltered history and trim it here.
             df = _safe(fn, provider="imf", chokepoint=v, start_date=start)
+            if df.empty:
+                df = _safe(fn, provider="imf", chokepoint=v)
             if not df.empty:
-                frames.append(df.reset_index())
+                df = df.reset_index()
+                if "date" in df:
+                    df["date"] = pd.to_datetime(df["date"])
+                    df = df[df["date"].dt.date >= start]
+                frames.append(df)
                 break
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 

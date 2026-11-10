@@ -50,7 +50,8 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
 
     # 2. Regime from calendars
     w0, w1 = sources.window(asof)
-    econ = sources.econ_calendar(w0, w1, ob.get("econ_calendar_providers", ob.get("econ_calendar_provider", "fred")))
+    econ = sources.econ_calendar(w0, w1, ob.get("econ_calendar_providers", ["fred_rest", "treasury_auctions"]),
+                                 ob.get("auction_terms"))
     earn = sources.earnings_calendar(w0, w1, ob["earnings_provider"])
     regime = rg.detect(cfg, econ, earn)
     log.info("Regime: %s", regime["name"])

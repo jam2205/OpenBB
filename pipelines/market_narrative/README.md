@@ -36,7 +36,7 @@ python -m mnp.run --out reports            # add --no-nlp / --no-model to skip h
 | `HF_TOKEN` | optional | higher HuggingFace download rate limits |
 | `BENZINGA_API_KEY` | optional | world/macro news feed |
 
-Economic calendars from FRED and FMP are merged; FRED alone is enough to detect bond and Fed weeks. Earnings weeks use FMP's earnings calendar. MD&A text comes from SEC filings (free). Transcripts need a paid FMP plan and are skipped otherwise. API keys are masked in all log output. The notebook accepts common alternative secret names; see `ALIASES` in its second cell.
+The economic calendar comes from direct REST calls (`mnp/rest.py`): FRED's `releases/dates` API with your FRED key, and upcoming Treasury auctions from FiscalData with no key. OpenBB's own FRED calendar scrapes the FRED website and times out, so it is not used. When several week types apply (say CPI week plus an NVDA print), the first rule in `config.yaml → regimes` picks the template and the header lists the others. Earnings weeks use FMP's earnings calendar. MD&A text comes from SEC filings (free). Transcripts need a paid FMP plan and are skipped otherwise. API keys are masked in all log output. The notebook accepts common alternative secret names; see `ALIASES` in its second cell.
 In Colab, store keys under Secrets (🔑). The notebook copies them into the environment and OpenBB.
 
 ## Where to extend

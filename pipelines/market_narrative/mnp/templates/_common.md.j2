@@ -1,6 +1,6 @@
 {% macro header(title) %}
 # {{ title }} — {{ asof }}
-**Regime:** `{{ regime.name }}`{% if regime.events %} · **Catalysts:** {{ regime.events | join(", ") }}{% endif %}
+**Regime:** `{{ regime.name }}`{% if regime.also %} (also: {{ regime.also | join(', ') }}){% endif %}{% if regime.reporters and regime.name != 'earnings_week' %} · **Reporting:** {{ regime.reporters | join(', ') }}{% endif %}{% if regime.events %} · **Catalysts:** {{ regime.events | join(", ") }}{% endif %}
 
 {% endmacro %}
 

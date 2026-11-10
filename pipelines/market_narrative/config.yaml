@@ -38,7 +38,10 @@ openbb:
   transcript_provider: fmp           # earnings-call transcripts: FMP paid plans only (402 on free/starter)
   mdna_provider: sec                 # MD&A from SEC filings, free, no key
   earnings_provider: fmp             # needs FMP key; pipeline degrades gracefully without it
-  econ_calendar_providers: [fred, fmp]   # union of all that respond. FMP's needs a paid plan; FRED's is free with a key
+  # fred_rest = FRED API releases/dates (your FRED key, one call). treasury_auctions = FiscalData (no key).
+  # fmp / tradingeconomics = OpenBB providers that need a paid plan; add them here if you upgrade.
+  econ_calendar_providers: [fred_rest, treasury_auctions]
+  auction_terms: [10-Year, 20-Year, 30-Year]   # which coupon auctions make it a "bond week"
 
 minio:
   endpoint_env: MINIO_ENDPOINT       # values read from env / Colab secrets, never stored here
@@ -71,11 +74,12 @@ imf:
 regimes:
   - name: central_bank
     template: macro.md.j2
-    econ_keywords: [FOMC, Fed Interest Rate Decision, Monetary policy, ECB, BoJ, BoE]
+    econ_keywords: [FOMC, Fed Interest Rate Decision, Monetary policy meeting]
   - name: bond_week
     template: macro.md.j2
-    econ_keywords: [CPI, Consumer Price Index, PCE, Personal Income and Outlays, Nonfarm Payrolls,
-                    Employment Situation, Treasury, Auction, GDP, Gross Domestic Product, HICP]
+    # Matched against FRED release names and "Treasury Auction: <term> <type>" events.
+    econ_keywords: [Consumer Price Index, Personal Income and Outlays, Employment Situation,
+                    Gross Domestic Product, Producer Price Index, "Treasury Auction:", CPI, Nonfarm Payrolls, HICP]
   - name: earnings_week
     template: earnings.md.j2
     min_focus_reporters: 1           # >=1 focus equity reports in the window
