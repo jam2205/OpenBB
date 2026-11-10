@@ -7,6 +7,7 @@ import logging
 from datetime import date, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -39,6 +40,7 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
     prices = pd.concat([
         sources.closes(eq_syms, start, ob["price_provider"], "equity"),
         sources.closes(u["fx_openbb"], start, ob["price_provider"], "currency"),
+        sources.closes(u.get("fx_ecb", []), start, "ecb", "currency"),
         sources.minio_closes(u.get("fx_minio", []), cfg["minio"]),
     ], axis=1).sort_index()
     prices = prices.rename(columns={**u["metals"], **u["bonds"]})
@@ -48,7 +50,7 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
 
     # 2. Regime from calendars
     w0, w1 = sources.window(asof)
-    econ = sources.econ_calendar(w0, w1, ob["econ_calendar_provider"])
+    econ = sources.econ_calendar(w0, w1, ob.get("econ_calendar_providers", ob.get("econ_calendar_provider", "fred")))
     earn = sources.earnings_calendar(w0, w1, ob["earnings_provider"])
     regime = rg.detect(cfg, econ, earn)
     log.info("Regime: %s", regime["name"])
@@ -88,6 +90,24 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         last = rates.iloc[-1]
         curve = _fmt_bp((last["year_10"] - last["year_2"]) * 100)  # provider returns decimals
         rates = rates[[c for c in ("month_3", "year_2", "year_5", "year_10", "year_30") if c in rates]].tail(5)
+
+    # 4a. FRED macro: level, 1w / 1m change; gold vs real yield
+    fcfg = cfg.get("fred", {})
+    fr = sources.fred(list(fcfg.get("series", {})), start)
+    fred_tbl = pd.DataFrame()
+    gold_real = "n/a"
+    if not fr.empty:
+        ff = fr.ffill()
+        last_date = ff.index[-1]
+        def _chg(days):
+            past = ff[ff.index <= last_date - timedelta(days=days)]
+            return ff.iloc[-1] - past.iloc[-1] if not past.empty else pd.Series(index=ff.columns, dtype=float)
+        fred_tbl = pd.DataFrame({"name": pd.Series(fcfg["series"]), "last": ff.iloc[-1], "chg_1w": _chg(7), "chg_1m": _chg(30)})
+        gd = fcfg.get("gold_driver")
+        if gold and gd in fr and gold in prices:
+            j = pd.concat([np.log(prices[gold]).diff(), fr[gd].diff()], axis=1, keys=["g", "r"]).dropna()
+            if len(j) > cfg["corr_window"]:
+                gold_real = f"{j.tail(cfg['corr_window']).corr().iloc[0, 1]:+.2f} / {j.corr().iloc[0, 1]:+.2f}"
 
     # 4b. IMF: macro for countries/currencies + shipping chokepoints
     icfg = cfg.get("imf", {})
@@ -143,6 +163,7 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         driver_method=scored["driver_method"].iloc[0] if not scored.empty else "n/a", fundamentals=funds, earnings_tone=earnings_tone,
         y10_move=y10_move, rates=rates, curve_2s10s=curve, gold_y10=gold_y10,
         predictions=predictions, model_note=model_note,
+        fred=fred_tbl, gold_real=gold_real,
         imf_macro=imf_macro.tail(20) if not imf_macro.empty else imf_macro, chokepoints=choke_tbl,
     )
     path = report.render(ctx, regime["template"], out_dir)

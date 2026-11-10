@@ -100,8 +100,25 @@ def earnings_calendar(start: date, end: date, provider: str) -> pd.DataFrame:
     return _safe(_obb().equity.calendar.earnings, start_date=start, end_date=end, provider=provider)
 
 
-def econ_calendar(start: date, end: date, provider: str) -> pd.DataFrame:
-    return _safe(_obb().economy.calendar, start_date=start, end_date=end, provider=provider)
+def econ_calendar(start: date, end: date, providers: list[str] | str) -> pd.DataFrame:
+    """Union of economic calendars (FRED: US releases, ECB: euro area, FMP: global)."""
+    providers = [providers] if isinstance(providers, str) else providers
+    frames = []
+    for p in providers:
+        df = _safe(_obb().economy.calendar, start_date=start, end_date=end, provider=p)
+        if not df.empty:
+            frames.append(df.reset_index().assign(calendar_source=p))
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def fred(series: list[str], start: date) -> pd.DataFrame:
+    """Wide frame of FRED series (needs fred_api_key)."""
+    if not series:
+        return pd.DataFrame()
+    df = _safe(_obb().economy.fred_series, symbol=",".join(series), start_date=start, provider="fred")
+    if not df.empty:
+        df.index = pd.to_datetime(df.index)
+    return df
 
 
 def fundamentals(symbol: str, provider: str = "yfinance") -> dict[str, pd.DataFrame]:

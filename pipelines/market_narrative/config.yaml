@@ -29,6 +29,7 @@ universe:
   metals:   {GC=F: Gold, SI=F: Silver, HG=F: Copper}
   bonds:    {^TNX: US10Y yield, ^FVX: US5Y yield, TLT: 20Y+ Treasury ETF}
   fx_openbb: [EURUSD, USDJPY]        # pulled via obb.currency.price.historical
+  fx_ecb:    []                     # ECB daily reference rates (no key), e.g. [EURPLN, EURHUF, EURTRY, EURZAR]
   fx_minio:  []                      # pairs OpenBB doesn't cover -> loaded from MinIO, e.g. [USDNGN, USDKES]
 
 openbb:
@@ -36,7 +37,7 @@ openbb:
   news_provider: yfinance            # swap to benzinga/fmp/tiingo if you have keys
   documents_provider: fmp            # transcripts + MD&A (FMP key)
   earnings_provider: fmp             # needs FMP key; pipeline degrades gracefully without it
-  econ_calendar_provider: fmp
+  econ_calendar_providers: [fred, ecb, fmp]   # union of all that respond; FRED key covers US, ECB needs no key
 
 minio:
   endpoint_env: MINIO_ENDPOINT       # values read from env / Colab secrets, never stored here
@@ -46,6 +47,17 @@ minio:
   bucket: fx-data
   # object path per pair; {pair} is substituted. Expect columns: date, close (open/high/low optional)
   object_pattern: "daily/{pair}.parquet"
+
+# FRED (key): daily/weekly US macro that drives cross-asset moves. Shown with 1w / 1m changes.
+fred:
+  series:
+    DFII10: 10Y real yield (TIPS)          # main driver of gold
+    T10YIE: 10Y breakeven inflation
+    DFF: Fed funds effective
+    BAMLH0A0HYM2: HY credit spread
+    DTWEXBGS: Broad trade-weighted USD
+    ICSA: Initial jobless claims
+  gold_driver: DFII10
 
 # IMF (no API key). Fill `indicators` with symbols found via the notebook's IMF search cell,
 # e.g. exchange rates for the MinIO currencies or CPI for their countries. Format: "DATAFLOW::INDICATOR".
@@ -58,10 +70,11 @@ imf:
 regimes:
   - name: central_bank
     template: macro.md.j2
-    econ_keywords: [FOMC, Fed Interest Rate Decision, ECB, BoJ, BoE]
+    econ_keywords: [FOMC, Fed Interest Rate Decision, Monetary policy, ECB, BoJ, BoE]
   - name: bond_week
     template: macro.md.j2
-    econ_keywords: [CPI, PCE, Nonfarm Payrolls, Treasury, Auction, GDP]
+    econ_keywords: [CPI, Consumer Price Index, PCE, Personal Income and Outlays, Nonfarm Payrolls,
+                    Employment Situation, Treasury, Auction, GDP, Gross Domestic Product, HICP]
   - name: earnings_week
     template: earnings.md.j2
     min_focus_reporters: 1           # >=1 focus equity reports in the window

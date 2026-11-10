@@ -5,10 +5,15 @@
 
 **10Y weekly move:** {{ y10_move }} · **2s10s:** {{ curve_2s10s }}
 
+{% if fred is defined and not fred.empty %}
+## US macro dashboard (FRED)
+{{ fred | md }}
+{% endif %}
+
 {{ c.drivers_block() }}
 {{ c.cross_asset_block() }}
 ## Transmission map
-- **Yields → Metals:** gold vs 10Y correlation recent/full: {{ gold_y10 }}. A negative reading means the usual real-rate relationship holds. A positive reading means safe-haven or central-bank demand is outweighing rates.
+- **Yields → Metals:** gold vs 10Y nominal: {{ gold_y10 }} · gold vs 10Y **real** yield (FRED): {{ gold_real }} (recent/full). A negative reading means the usual real-rate relationship holds. A positive reading means safe-haven or central-bank demand is outweighing rates.
 - **Yields → FX:** the USDJPY vs 10Y relationship is in the shift table. Watch for intervention headlines under the `fx` driver.
 - **Yields → Equities:** if `{{ anchor }}`'s correlation to 10Y has turned negative, then hot data is bearish for stocks ("good news is bad news").
 {{ c.global_block() }}
