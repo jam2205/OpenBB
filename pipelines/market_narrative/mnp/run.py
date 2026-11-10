@@ -89,6 +89,23 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         curve = _fmt_bp((last["year_10"] - last["year_2"]) * 100)  # provider returns decimals
         rates = rates[[c for c in ("month_3", "year_2", "year_5", "year_10", "year_30") if c in rates]].tail(5)
 
+    # 4b. IMF: macro for countries/currencies + shipping chokepoints
+    icfg = cfg.get("imf", {})
+    imf_macro = sources.imf_indicators(icfg.get("indicators", []), icfg.get("countries", []),
+                                       asof - timedelta(days=730))
+    choke = sources.chokepoints(icfg.get("chokepoints", []), asof - timedelta(days=90))
+    choke_tbl = pd.DataFrame()
+    if not choke.empty and "chokepoint" in choke:
+        num = choke.select_dtypes("number").columns
+        col = next((c for c in ("vessels_total", "capacity_total", "transit_total") if c in num), num[0] if len(num) else None)
+        if col:
+            choke = choke.reset_index()
+            date_col = "date" if "date" in choke else choke.columns[0]
+            piv = choke.pivot_table(index=date_col, columns="chokepoint", values=col).sort_index()
+            choke_tbl = pd.DataFrame({"last_7d_avg": piv.tail(7).mean(), "prior_90d_avg": piv.mean()})
+            choke_tbl["vs_90d"] = choke_tbl["last_7d_avg"] / choke_tbl["prior_90d_avg"] - 1
+            choke_tbl.attrs["metric"] = col
+
     # 5. Fundamentals for reporters (earnings regime)
     funds = {}
     if regime["name"] == "earnings_week":
@@ -126,6 +143,7 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         driver_method=scored["driver_method"].iloc[0] if not scored.empty else "n/a", fundamentals=funds, earnings_tone=earnings_tone,
         y10_move=y10_move, rates=rates, curve_2s10s=curve, gold_y10=gold_y10,
         predictions=predictions, model_note=model_note,
+        imf_macro=imf_macro.tail(20) if not imf_macro.empty else imf_macro, chokepoints=choke_tbl,
     )
     path = report.render(ctx, regime["template"], out_dir)
     log.info("Report written: %s", path)

@@ -39,3 +39,15 @@ These are single-split, no-baseline numbers: treat them as context, not as trade
 _{{ model_note }}_
 {% endif %}
 {% endmacro %}
+
+{% macro global_block() %}
+{% if chokepoints is defined and not chokepoints.empty %}
+## Shipping chokepoints (IMF PortWatch)
+{{ chokepoints | md }}
+_A sharp drop vs the 90-day average at Hormuz / Bab el-Mandeb / Suez is a supply-side signal for oil and a risk-off input for metals._
+{% endif %}
+{% if imf_macro is defined and not imf_macro.empty %}
+## IMF macro (configured indicators)
+{{ imf_macro | md }}
+{% endif %}
+{% endmacro %}

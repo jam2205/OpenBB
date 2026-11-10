@@ -1,5 +1,8 @@
 openbb>=4.4
 openbb-yfinance
+openbb-imf          # IMF macro + PortWatch (no key)
+openbb-fmp          # calendars, transcripts, MD&A (FMP key)
+openbb-federal-reserve
 transformers>=4.48   # ModernBERT needs >=4.48
 torch
 huggingface_hub

@@ -1,9 +1,10 @@
 """NLP layer.
 
-- Tone: fine-tuned ModernBERT tone head if present, else FinBERT.
+- Tone: Modern-FinBERT-large (ModernBERT fine-tuned for financial sentiment), with
+  FinBERT-tone as an optional second opinion; a local fine-tuned head overrides both.
 - Drivers: fine-tuned head if present, else pre-trained ModernBERT zero-shot classifier,
   else embedding similarity.
-- Long documents (transcripts, MD&A): ModernBERT reads 8,192-token chunks; FinBERT is capped at 512.
+- Long documents (transcripts, MD&A): chunked to `doc_chunk_tokens` and length-weighted.
 """
 
 from __future__ import annotations
@@ -56,7 +57,7 @@ class NLP:
     def _clf(self, model_id: str, max_length: int):
         from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 
-        kw = modernbert_kwargs(self.device) if "modernbert" in str(model_id).lower() or Path(str(model_id)).exists() else {}
+        kw = modernbert_kwargs(self.device) if "modern" in str(model_id).lower() or Path(str(model_id)).exists() else {}
         model = AutoModelForSequenceClassification.from_pretrained(model_id, **kw)
         tok = AutoTokenizer.from_pretrained(model_id)
         return pipeline("text-classification", model=model, tokenizer=tok,
@@ -64,9 +65,11 @@ class NLP:
 
     @cached_property
     def _tone(self):
-        if self.tone_head:
-            return self._clf(self.tone_head, self.cfg.get("max_length", 8192))
-        return self._clf(self.cfg["sentiment"], 512)
+        return self._clf(self.tone_head or self.cfg["sentiment"], self.cfg.get("max_length", 8192))
+
+    @cached_property
+    def _tone_check(self):
+        return self._clf(self.cfg["sentiment_check"], 512)
 
     @cached_property
     def _drivers(self):
@@ -88,11 +91,12 @@ class NLP:
         return tok, model.to(self.device).eval()
 
     # ---------- tone ----------
-    def tone(self, texts: list[str], batch_size: int = 32) -> pd.DataFrame:
+    def tone(self, texts: list[str], batch_size: int = 32, check: bool = False) -> pd.DataFrame:
         """Label + signed score in [-1, 1] (positive=+p, negative=-p, neutral=0)."""
         if not texts:
             return pd.DataFrame(columns=["label", "score", "signed"])
-        df = pd.DataFrame(self._tone(texts, batch_size=batch_size))
+        clf = self._tone_check if check else self._tone
+        df = pd.DataFrame(clf(texts, batch_size=batch_size))
         df["label"] = df["label"].str.lower()
         df["signed"] = df["label"].map({"positive": 1, "negative": -1}).fillna(0) * df["score"]
         return df
@@ -122,6 +126,10 @@ class NLP:
         tone = self.tone(texts)
         out = news.copy().reset_index(drop=True)
         out[["tone", "tone_score", "signed"]] = tone[["label", "score", "signed"]].values
+        if self.cfg.get("sentiment_check"):
+            chk = self.tone(texts, check=True)
+            out["tone_check"] = chk["label"].values
+            out["tone_agree"] = out["tone"] == out["tone_check"]
         if self.driver_head:
             pred = pd.DataFrame(self._drivers(texts, batch_size=32))
             out["driver"], out["driver_sim"] = pred["label"].values, pred["score"].values
@@ -146,7 +154,10 @@ class NLP:
     def driver_summary(scored: pd.DataFrame) -> pd.DataFrame:
         if scored.empty:
             return pd.DataFrame(columns=["driver", "count", "net_tone", "share"])
-        g = scored.groupby("driver").agg(count=("signed", "size"), net_tone=("signed", "mean"))
+        agg = {"count": ("signed", "size"), "net_tone": ("signed", "mean")}
+        if "tone_agree" in scored:
+            agg["model_agree"] = ("tone_agree", "mean")  # low agreement = ambiguous news, weight it less
+        g = scored.groupby("driver").agg(**agg)
         g["share"] = g["count"] / g["count"].sum()
         return g.sort_values("count", ascending=False).reset_index()
 
@@ -176,16 +187,16 @@ class NLP:
         """
         if not text or not text.strip():
             return {"net_tone": np.nan, "chunks": 0, "method": "n/a"}
-        limit = self.cfg.get("max_length", 8192) if self.tone_head else 512
+        limit = self.cfg.get("doc_chunk_tokens", 1024)
         chunks = self.chunk(text, limit)
-        t = self.tone(chunks, batch_size=4 if limit > 512 else 32)
+        t = self.tone(chunks, batch_size=8)
         w = np.array([len(c) for c in chunks], dtype=float)
         t["text"] = chunks
         return {
             "net_tone": float(np.average(t["signed"], weights=w)),
             "pct_negative": float((t["label"] == "negative").mean()),
             "chunks": len(chunks),
-            "method": "ModernBERT-ft" if self.tone_head else "FinBERT-512",
+            "method": f"{Path(str(self.tone_head or self.cfg['sentiment'])).name} @{limit}tok",
             "most_negative": t.nsmallest(1, "signed")["text"].iloc[0][:300],
             "most_positive": t.nlargest(1, "signed")["text"].iloc[0][:300],
         }

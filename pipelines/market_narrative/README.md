@@ -26,6 +26,18 @@ pip install -r requirements.txt
 python -m mnp.run --out reports            # add --no-nlp / --no-model to skip heavy parts
 ```
 
+## API keys
+| Key | Needed? | Unlocks |
+|---|---|---|
+| none: HuggingFace public models, yfinance, IMF, Federal Reserve | — | prices, company news, all NLP, AcyLa model, IMF macro + PortWatch, Treasury curve |
+| `FMP_API_KEY` | **recommended** | earnings + economic calendars (week detection), transcripts, MD&A |
+| `MINIO_*` (endpoint, access, secret) | for your extra FX pairs | daily FX not on yfinance |
+| `HF_TOKEN` | optional | higher HuggingFace download rate limits |
+| `BENZINGA_API_KEY` | optional | world/macro news feed |
+
+Without FMP, every week falls back to the `default` template and the earnings section has no transcript tone.
+In Colab, store keys under Secrets (🔑). The notebook copies them into the environment and OpenBB.
+
 ## Where to extend
 | Want to… | Edit |
 |---|---|
@@ -46,7 +58,7 @@ python -m mnp.run --out reports            # add --no-nlp / --no-model to skip h
 - **Models (all pre-trained, no training needed):**
   | Job | Model |
   |---|---|
-  | News / document tone | `yiyanghkust/finbert-tone` |
+  | News / document tone | `beethogedeon/Modern-FinBERT-large` (ModernBERT-large fine-tuned on Financial PhraseBank) + `yiyanghkust/finbert-tone` as a second opinion |
   | Headline → driver | `MoritzLaurer/ModernBERT-large-zeroshot-v2.0` (zero-shot; edit labels in `config.yaml → drivers`) |
   | Embeddings / long-doc search | `nomic-ai/modernbert-embed-base` (8k context, needs the task prefix) |
 

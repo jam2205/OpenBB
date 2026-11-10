@@ -1,11 +1,13 @@
 # Market Narrative Pipeline config. Edit freely; nothing here is hard-coded in code.
 models:
-  sentiment: yiyanghkust/finbert-tone                    # pre-trained financial tone (pos/neg/neutral)
+  sentiment: beethogedeon/Modern-FinBERT-large           # ModernBERT-large fine-tuned on Financial PhraseBank (pos/neg/neutral, 8k ctx)
+  sentiment_check: yiyanghkust/finbert-tone              # second opinion on headlines; set null to skip (saves ~0.4GB)
+  doc_chunk_tokens: 1024     # long docs are chunked; the tone model was trained on sentences, so keep chunks modest
   zero_shot: MoritzLaurer/ModernBERT-large-zeroshot-v2.0 # pre-trained label-anything classifier -> drivers
   embedder: nomic-ai/modernbert-embed-base               # pre-trained 8k-context embeddings (similarity / search)
   embed_prefix: "classification: "                       # nomic task prefix; use "search_query: "/"search_document: " for retrieval
   base: answerdotai/ModernBERT-large                     # only used by mnp.finetune (optional upgrade)
-  tone_head: heads/tone        # optional: fine-tuned ModernBERT tone head; used if the folder exists
+  tone_head: heads/tone        # optional: your own fine-tuned tone head; overrides `sentiment` if the folder exists
   driver_head: heads/driver    # optional: fine-tuned driver head; used if the folder exists
   max_length: 8192
   predictive: AcyLa/multi-asset-predictive-model
@@ -44,6 +46,13 @@ minio:
   bucket: fx-data
   # object path per pair; {pair} is substituted. Expect columns: date, close (open/high/low optional)
   object_pattern: "daily/{pair}.parquet"
+
+# IMF (no API key). Fill `indicators` with symbols found via the notebook's IMF search cell,
+# e.g. exchange rates for the MinIO currencies or CPI for their countries. Format: "DATAFLOW::INDICATOR".
+imf:
+  countries: [USA, JPN, DEU, GBR, CHN, NGA, KEN]
+  indicators: []
+  chokepoints: [suez_canal, panama_canal, strait_of_hormuz, bab_el_mandeb_strait, malacca_strait]
 
 # Regime = which "cookie cutter" template is used this week. First match wins (priority order).
 regimes:

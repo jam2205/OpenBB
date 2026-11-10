@@ -124,6 +124,26 @@ def documents(symbol: str, provider: str = "fmp") -> dict[str, str]:
     return out
 
 
+def imf_search(query: str) -> pd.DataFrame:
+    """Find IMF indicator symbols (no key). E.g. imf_search("exchange rate")."""
+    return _safe(_obb().economy.available_indicators, provider="imf", query=query)
+
+
+def imf_indicators(symbols: list[str], countries: list[str], start: date) -> pd.DataFrame:
+    if not symbols:
+        return pd.DataFrame()
+    return _safe(_obb().economy.indicators, provider="imf", symbol=",".join(symbols),
+                 country=",".join(countries), start_date=start)
+
+
+def chokepoints(names: list[str], start: date) -> pd.DataFrame:
+    """IMF PortWatch daily transit volumes through shipping chokepoints (oil / metals / geopolitics)."""
+    if not names:
+        return pd.DataFrame()
+    return _safe(_obb().economy.shipping.chokepoint_volume, provider="imf",
+                 chokepoint=",".join(names), start_date=start)
+
+
 def window(today: date | None = None, ahead: int = 7) -> tuple[date, date]:
     today = today or date.today()
     return today, today + timedelta(days=ahead)
