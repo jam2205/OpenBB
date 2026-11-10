@@ -60,6 +60,44 @@ medallion.register(read, tables, datasets={"calendar": "..."})  # choose one you
 No addresses, bucket names or credentials live in this repository, and nothing is downloaded until a section needs it. If the calendar has no `actual`
 values, the report shows forecast and previous but cannot compute a surprise.
 
+## Per-pair session briefs
+`mnp/pairs.py` writes one brief per FX pair (`config.yaml → pairs.list`) from your own data store
+only: `pairs.run()` in the notebook, or `python -c "from mnp import pairs; pairs.run()"` after
+registering a reader. Each brief has:
+
+| Part | What it says | From |
+|---|---|---|
+| State | One of `event_ahead`, `range_spent`, `early_session`, `range_open`; picks the opening paragraph | calendar + range used |
+| Today's range | Day low and high, how much of the expected range is used, how often each extreme held from a state like this, where the other side would be if one holds | `candles` (hourly), `range_forecast` or ADR20 |
+| This week | Week low and high so far, how often they stood from this day on, and the plain weekday table | `candles` |
+| Fundamentals | Releases for the two currencies, 10Y yield gap and its change, carry, COT positioning, regime label | `calendar`, `yields`, `carry`, `positioning`, `regime` |
+
+The day rolls at 17:00 New York. Every hold rate is printed beside two comparisons: the plain
+rate at that hour, and **the same state on a volatility-matched random walk** (the pair's own
+bars with each bar's direction randomised). The second one matters: on synthetic noise with no
+structure at all, a low that was 7 hours old with 70-100% of the range used "held" 89% of the
+time against a 73% plain rate. So a high rate is a real probability, useful for placing a target,
+but only a rate outside the random-walk band says the market is doing something worth
+researching. The briefs never call a direction, and nothing in them has been through a
+registered test with a control: they are context for a setup and a source of hypotheses.
+
+`pairs.run()` also writes `reports/pairs/pairs_latest.json`, one flat row per pair.
+
+## Serving it to agents (OpenBB MCP)
+`mnp/api.py` is a small read-only HTTP app. The OpenBB MCP server in this repository turns its
+routes into tools:
+
+```bash
+pip install fastapi openbb-mcp-server
+cd pipelines/market_narrative
+MNP_READER=<module>:<read function> MNP_TABLES=<module>:<tables function> openbb-mcp --app mnp.api:app --port 8001
+```
+
+Tools: `mnp_pair_brief`, `mnp_pairs`, `mnp_calendar`, `mnp_global_yields`, `mnp_positioning`,
+`mnp_health`. It must run on a machine that can reach your data store, and it reads through the
+function you name in `MNP_READER`, so no address is stored here. Pair answers carry `stale`. The
+routes are tested; starting them under `openbb-mcp` has not been run yet.
+
 ## Swiss National Bank
 `mnp/snb.py` reads the SNB data portal (data.snb.ch, no key) and adds a Switzerland / CHF section:
 policy rate and SARON, **sight deposits** (the usual intervention proxy), the SNB's own quarterly

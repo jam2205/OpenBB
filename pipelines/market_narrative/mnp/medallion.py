@@ -21,6 +21,9 @@ Expected columns:
   candles      time, pair, close
   yields       date, <cc>_10y [, <cc>_2y]     one row per day, cc = us, de, jp, gb, ch ...
   positioning  pair, report_date, institutional_bias [, bias_direction, is_current, report_age_days]
+  range_forecast  pair, anchor_time, window_end, forecast_range [, adr20]   (pair briefs)
+  regime       pair, state, timestamp [, confidence, vocabulary]            (pair briefs)
+  candles      also open, high, low for the pair briefs' day and week profile
 
 Nothing is downloaded at registration: a dataset is read the first time a section needs it.
 
@@ -52,6 +55,8 @@ _ROLE_PATTERNS = {
     "candles": [r"^candles?_?1h$", r"^candles?.*1h"],
     "yields": [r"bond.*yield", r"^yields?"],
     "positioning": [r"cot.*pair", r"pair.*(cot|positioning)"],
+    "range_forecast": [r"^range.*forecast", r"range.*forecast"],
+    "regime": [r"markov.*regime", r"^regime.*log"],
 }
 
 
@@ -257,3 +262,65 @@ def positioning(pairs: list[str] | None = None, top: int = 6) -> pd.DataFrame:
     for c in t.select_dtypes("float").columns:
         t[c] = t[c].round(2)
     return t.set_index("pair")
+
+
+def _filtered(name: str | None, pair: str, columns: list[str] | None = None) -> pd.DataFrame:
+    """One pair's rows. Readers differ in what they accept, so try a pushed-down filter first
+    and fall back to reading the dataset and filtering here."""
+    if _read is None or not name:
+        return pd.DataFrame()
+    for kw in ({"columns": columns, "filters": [("pair", "==", pair)]}, {}):
+        try:
+            df = _read(name, **{k: v for k, v in kw.items() if v is not None})
+        except TypeError:
+            continue
+        except Exception as e:  # noqa: BLE001
+            log.warning("private dataset unavailable: %s: %s", type(e).__name__, str(e)[:200])
+            return pd.DataFrame()
+        if isinstance(df, pd.DataFrame) and "pair" in df:
+            return df[df["pair"] == pair]
+    return pd.DataFrame()
+
+
+def hourly(pair: str, start: date | None = None) -> pd.DataFrame:
+    """Hourly bars for one pair from the candles role: time (UTC), open, high, low, close."""
+    df = _filtered(role("candles"), pair)
+    if df.empty or not {"time", "high", "low", "close"} <= set(df.columns):
+        return pd.DataFrame()
+    df = df[[c for c in ("time", "open", "high", "low", "close") if c in df]].copy()
+    df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
+    if start is not None:
+        df = df[df["time"] >= pd.Timestamp(start, tz="UTC")]
+    return df.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
+
+
+def range_forecast(pair: str, now: pd.Timestamp) -> dict:
+    """The stored 24h range forecast whose window contains `now`, if there is one."""
+    df = _filtered(role("range_forecast"), pair)
+    if df.empty or not {"anchor_time", "window_end", "forecast_range"} <= set(df.columns):
+        return {}
+    a, e = pd.to_datetime(df["anchor_time"], utc=True), pd.to_datetime(df["window_end"], utc=True)
+    hit = df[(a <= now) & (now < e)]
+    if hit.empty:
+        return {}
+    r = hit.iloc[-1]
+    return {"forecast_range": float(r["forecast_range"]), "anchor_time": pd.Timestamp(r["anchor_time"]),
+            "adr20": float(r["adr20"]) if "adr20" in r and pd.notna(r["adr20"]) else None}
+
+
+def regime(pair: str, now: pd.Timestamp, max_age_h: float = 48) -> pd.DataFrame:
+    """Latest regime label per vocabulary (two label sets share the log; they are never pooled)."""
+    df = _filtered(role("regime"), pair)
+    if df.empty or not {"state", "timestamp"} <= set(df.columns):
+        return pd.DataFrame()
+    df = df.copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    df = df[df["timestamp"] <= now].sort_values("timestamp")
+    if "vocabulary" not in df:
+        df["vocabulary"] = "unlabelled"
+    last = df.groupby(df["vocabulary"].fillna("unlabelled")).tail(1)
+    out = pd.DataFrame({"state": last["state"].to_numpy(), "confidence": last.get("confidence", pd.Series(index=last.index, dtype=float)).to_numpy(),
+                        "age_h": ((now - last["timestamp"]).dt.total_seconds() / 3600).round(1).to_numpy()},
+                       index=pd.Index(last["vocabulary"].fillna("unlabelled").to_numpy(), name="vocabulary"))
+    out["stale"] = out["age_h"] > max_age_h
+    return out

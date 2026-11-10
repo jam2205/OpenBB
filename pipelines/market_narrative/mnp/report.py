@@ -89,6 +89,30 @@ def render(ctx: dict, template: str, out_dir: str | Path, html: bool = True) -> 
     return md_path
 
 
+def render_text(ctx: dict, template: str) -> str:
+    """Render any template to markdown text."""
+    env = Environment(loader=FileSystemLoader(_TPL), trim_blocks=True, lstrip_blocks=True)
+    env.filters["md"] = _md
+    env.filters["plain"] = _plain
+    return env.get_template(template).render(**ctx)
+
+
+def render_named(ctx: dict, template: str, out_dir: str | Path, stem: str) -> Path:
+    """Render any template to <out_dir>/<stem>.md and .html (used by the per-pair briefs)."""
+    text = render_text(ctx, template)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    md_path = out / f"{stem}.md"
+    md_path.write_text(text)
+    try:
+        import markdown
+
+        md_path.with_suffix(".html").write_text(f"{_CSS}<div class='mnp'>{markdown.markdown(text, extensions=['tables'])}</div>")
+    except ImportError:
+        pass
+    return md_path
+
+
 def show(path: str | Path):
     """Display a report in a notebook. Uses the HTML file, because a notebook's Markdown view
     typesets anything between two dollar signs as a formula and garbles prices in headlines.

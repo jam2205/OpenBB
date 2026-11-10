@@ -16,6 +16,7 @@ boto3           # only if your own connector cell needs it
 joblib
 tabulate
 markdown
+# fastapi + openbb-mcp-server   # only to serve mnp.api to agents (openbb-mcp --app mnp.api:app)
 datasets        # only for mnp.finetune
 accelerate      # only for mnp.finetune
 # flash-attn    # optional, Ampere+ GPUs (A100/L4); skip on T4

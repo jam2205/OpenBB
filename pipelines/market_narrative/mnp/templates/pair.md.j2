@@ -1,0 +1,73 @@
+{% macro rate(s) %}{{ "%.0f%%" | format(100 * s.p) }} (all days at this hour: {{ "%.0f%%" | format(100 * s.baseline) }}, {{ "%+.0f" | format(s.lift_pp) }} points; {{ s.n_days }} days in {{ s.n_weeks }} weeks; 95% range {{ "%.0f" | format(100 * s.ci_low) }}-{{ "%.0f%%" | format(100 * s.ci_high) }}){% endmacro %}
+{% macro nullcell(s) %}{% if s.null is defined %}{{ "%.0f%%" | format(100 * s.null) }} ({{ "%.0f" | format(100 * s.null_low) }}-{{ "%.0f%%" | format(100 * s.null_high) }}): **{{ s.vs_null }}**{% else %}n/a{% endif %}{% endmacro %}
+# {{ b.pair }} — session brief, {{ b.asof.strftime("%a %d %b %Y %H:%M") }} UTC
+**State:** `{{ b.template }}` · {{ p.hours_elapsed }}h into the trading day (rolls 17:00 New York), {{ p.hours_left }}h left · last {{ "%.5g" | format(p.last) }}{% if b.stale %} · ⚠️ **bars are {{ b.data_age_h }}h old: this is not the current state**{% endif %}
+
+
+{% if b.template == "event_ahead" %}
+**Read:** {{ b.events_today }} high-impact release{{ "s" if b.events_today != 1 }} for {{ b.base }} or {{ b.quote }} before the roll. The rates below come from all days; on release days ranges break more often, so do not treat either extreme as set until the release has passed.
+{% elif b.template == "range_spent" %}
+**Read:** the day has already travelled {{ "%.0f%%" | format(100 * p.used_of_expected) }} of its expected range. Further extension is the less common outcome; the question is which extreme stands.
+{% elif b.template == "early_session" %}
+**Read:** only the Asia hours are in. On most days at least one extreme is still to come (see the session table), so neither is established yet.
+{% else %}
+**Read:** {{ "%.0f%%" | format(100 * p.used_of_expected) }} of the expected range is used, with room of about {{ "%.5g" | format(p.room_left) }} left.
+{% endif %}
+
+## Today's range
+|  | level | status | how often it held from a state like this | same state on a random walk |
+|---|---:|---|---|---|
+| Day low | {{ "%.5g" | format(p.low) }} | **{{ b.low_verdict }}** ({{ p.low_hold.age_h }}h old) | {{ rate(p.low_hold) }} | {{ nullcell(p.low_hold) }} |
+| Day high | {{ "%.5g" | format(p.high) }} | **{{ b.high_verdict }}** ({{ p.high_hold.age_h }}h old) | {{ rate(p.high_hold) }} | {{ nullcell(p.high_hold) }} |
+
+- Expected range today: {{ "%.5g" | format(p.expected_range) }} (from the {{ p.expected_from }}); ADR20 {{ "%.5g" | format(p.adr20) }}; travelled so far {{ "%.5g" | format(p.range_so_far) }}.
+- If the low holds, a full expected range puts the high near **{{ "%.5g" | format(p.high_if_low_holds) }}**. If the high holds, the low near **{{ "%.5g" | format(p.low_if_high_holds) }}**.
+- Matched on: low — {{ p.low_hold.matched_on }}; high — {{ p.high_hold.matched_on }}.
+
+_"Likely in" needs a hold rate of 70% or more, at least 5 points above the plain rate for this hour, and 60 or more distinct weeks behind it. These are frequencies from {{ p.history_days }} past days of this pair, not a tested signal. The last column is the same state on this pair's own bars with direction randomised: an extreme that is old, with most of the range used, holds often by arithmetic alone. "Same as a random walk" means the probability is real and usable for sizing a target, but the market is adding nothing to it; "above" or "below" is where there may be something to research._
+
+**Which session sets the day's extremes** (share of days)
+{{ p.sessions | md }}
+{% if w and w.table is defined %}
+## This week (week of {{ w.week_of }})
+{% if w.low is defined %}
+|  | level | set on | how often it stood for the rest of the week |
+|---|---:|---|---|
+| Week low | {{ "%.5g" | format(w.low.level) }} | {{ w.low.set_on }} | {{ "%.0f%%" | format(100 * w.low.p) }} (any week through {{ w.through }}: {{ "%.0f%%" | format(100 * w.low.baseline) }}; {{ w.low.n_weeks }} weeks; 95% range {{ "%.0f" | format(100 * w.low.ci_low) }}-{{ "%.0f%%" | format(100 * w.low.ci_high) }}) |
+| Week high | {{ "%.5g" | format(w.high.level) }} | {{ w.high.set_on }} | {{ "%.0f%%" | format(100 * w.high.p) }} (any week through {{ w.through }}: {{ "%.0f%%" | format(100 * w.high.baseline) }}; {{ w.high.n_weeks }} weeks; 95% range {{ "%.0f" | format(100 * w.high.ci_low) }}-{{ "%.0f%%" | format(100 * w.high.ci_high) }}) |
+
+{% else %}
+_No finished day in this week yet._
+
+{% endif %}
+**Which day sets the weekly high and low** ({{ w.weeks }} complete weeks)
+{{ w.table | md }}
+_Your research record found that the NFP / CPI / FOMC schedule does not improve on this plain weekday table, so the table is the reference._
+{% endif %}
+
+## Fundamentals behind it
+{% if not b.calendar.empty %}
+**Scheduled for {{ b.base }} and {{ b.quote }}, next 7 days**
+{{ b.calendar | md }}
+{% else %}
+_No high-impact releases for {{ b.base }} or {{ b.quote }} in the next 7 days (or no calendar registered)._
+
+{% endif %}
+{% if b.yield_gap %}
+- **10Y yield gap ({{ b.base }} minus {{ b.quote }}):** {{ "%+.0f" | format(b.yield_gap.gap_bp) }}bp{% if b.yield_gap.gap_chg_1w_bp is defined %}, {{ "%+.0f" | format(b.yield_gap.gap_chg_1w_bp) }}bp on the week{% endif %}{% if b.yield_gap.gap_chg_1m_bp is defined %}, {{ "%+.0f" | format(b.yield_gap.gap_chg_1m_bp) }}bp on the month{% endif %}. A gap moving in the base currency's favour supports the pair.
+{% endif %}
+{% if not b.carry.empty %}
+
+**Carry**
+{{ b.carry | md }}
+{% endif %}
+{% if not b.positioning.empty %}
+
+**Positioning (COT)**
+{{ b.positioning | md }}
+{% endif %}
+{% if not b.regime.empty %}
+
+**Regime label** (one row per label set; the two sets are not comparable)
+{{ b.regime | md }}
+{% endif %}
