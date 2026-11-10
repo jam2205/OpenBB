@@ -76,7 +76,12 @@ calendar:
 # Per-pair session briefs (mnp.pairs): day and week range state plus the fundamentals behind it.
 # Built from your own data store only; needs the candles role (hourly open/high/low/close).
 pairs:
-  list: [EURUSD, GBPUSD, USDJPY, USDCHF, USDCAD, AUDUSD, NZDUSD]
+  # All 28 pairs of the eight majors. The stored range forecast covers some of them; the rest use ADR20
+  # as the expected range, and the brief says which.
+  list: [EURGBP, EURAUD, EURNZD, EURUSD, EURCAD, EURCHF, EURJPY,
+         GBPAUD, GBPNZD, GBPUSD, GBPCAD, GBPCHF, GBPJPY, AUDNZD,
+         AUDUSD, AUDCAD, AUDCHF, AUDJPY, NZDUSD, NZDCAD, NZDCHF,
+         NZDJPY, USDCAD, USDCHF, USDJPY, CADCHF, CADJPY, CHFJPY]
   history_days: 3650      # how far back the "how often did it hold" frequencies look
   max_age_h: 3            # older bars than this and the brief is marked "not the current state"
 
