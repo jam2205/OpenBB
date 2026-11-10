@@ -82,6 +82,15 @@ Cards appear in every report type, so an earnings name is not lost in a macro we
 plan, and so not used: news, economic calendar, transcripts, COT, insider search, intraday bars.
 Plan limits respected: at most 5 rows on earnings and statements, annual estimates and segments only.
 
+## Benzinga
+Benzinga is the only keyed news source here (FMP's news is not on a Starter-level plan), so it is what
+the tone and driver models read and what any fine-tuning set would be built from.
+`mnp/benzinga_probe.py` checks the key before you train: endpoints served, how far back news goes,
+whether articles have bodies, which channels and tags they carry, FX / commodity / rates coverage,
+and whether the economic calendar has `actual` and `consensus`. It has not been run against a live
+key yet (the API only takes the key as a URL parameter), so treat a `missing` result as a possible
+wrong path rather than missing data.
+
 ## Where to extend
 | Want to… | Edit |
 |---|---|
