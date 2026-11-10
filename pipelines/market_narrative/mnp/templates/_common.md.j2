@@ -1,6 +1,6 @@
 {% macro header(title) %}
 # {{ title }} — {{ asof }}
-**Regime:** `{{ regime.name }}`{% if regime.also %} (also: {{ regime.also | join(', ') }}){% endif %}{% if regime.reporters and regime.name != 'earnings_week' %} · **Reporting:** {{ regime.reporters | join(', ') }}{% endif %}{% if regime.events %} · **Catalysts:** {{ regime.events | join(", ") }}{% endif %}
+**Regime:** `{{ regime.name }}`{% if regime.also %} (also: {{ regime.also | join(', ') }}){% endif %}{% if regime.reporters and regime.name != 'earnings_week' %} · **Reporting:** {{ regime.reporters | join(', ') }}{% endif %}{% if regime.events %} · **Catalysts:** {{ regime.events | join(", ") | plain }}{% endif %}
 
 {% endmacro %}
 
@@ -8,10 +8,25 @@
 {% if calendar_tbl is defined and not calendar_tbl.empty %}
 ## This week's scheduled events
 {{ calendar_tbl | md }}
+{% if calendar_hidden %}
+_{{ calendar_hidden }} later events not shown (raise `calendar.max_rows` in config.yaml)._
+
+{% endif %}
+{% endif %}
+{% if world_yields is defined and not world_yields.empty %}
+## Global 10Y yields (your data store, as of {{ world_yields_asof }})
+{{ world_yields | md }}
+_Changes and spreads in basis points. `vs_US_bp` is the 10Y gap to the US; a widening gap in favour of a currency's bonds supports that currency._
+
 {% endif %}
 {% if carry is defined and not carry.empty %}
 ## FX carry (policy-rate differentials)
 {{ carry | md }}
+{% endif %}
+{% if positioning is defined and not positioning.empty %}
+## FX positioning (COT, your data store)
+{{ positioning | md }}
+_Positive bias = institutions net long the base currency against the quote. `report_age_days` shows how old the report is._
 {% endif %}
 {% endmacro %}
 
@@ -19,7 +34,8 @@
 {% for c in cards %}
 ## {{ c.symbol }}: earnings card
 {% if c.next %}
-**Next report: {{ c.next.date }}** · EPS expected {{ c.next.eps_est }} · revenue expected ${{ "%.1f" | format(c.next.revenue_est_bn) }}bn{% if c.next.beat_rate %} · track record: {{ c.next.beat_rate }}{% endif %}
+**Next report: {{ c.next.date }}** · EPS expected {{ c.next.eps_est }} · revenue expected USD {{ "%.1f" | format(c.next.revenue_est_bn) }}bn{% if c.next.beat_rate %} · track record: {{ c.next.beat_rate }}{% endif %}
+
 
 {% endif %}
 {% if not c.moves.empty %}
@@ -43,7 +59,7 @@
 {{ c.street | md }}
 {% endif %}
 {% if not c.ratings_trend.empty %}
-**Rating counts by month**
+**Analyst rating counts by month**
 {{ c.ratings_trend | md }}
 {% endif %}
 {% if not c.rating_changes.empty %}
@@ -79,7 +95,7 @@
 {{ us_data | md }}
 {% endif %}
 {% if sectors is defined and not sectors.empty %}
-## Sector moves and valuation ({{ sectors_asof }}, average one-day change)
+## Sector moves and valuation ({{ sectors_exchange }}-listed stocks, {{ sectors_asof }}, average one-day change)
 {{ sectors | md }}
 {% endif %}
 {% if industries is defined and not industries.empty %}
@@ -96,7 +112,7 @@
 
 Top headlines for the dominant driver:
 {% for h in top_headlines %}
-- [{{ h.tone }}] {{ h.title }}
+- [{{ h.tone }}] {{ h.title | plain }}
 {% endfor %}
 {% endmacro %}
 
@@ -117,9 +133,11 @@ _Changes and vol are in % for prices and in basis points for yields (see `unit`)
 {% if predictions is not none and not predictions.empty %}
 {{ predictions | md }}
 
-_`shown_signal` is "no skill" when the model's own test-set directional accuracy is below 55%.
+_`up_share` is how often the asset simply rose over that horizon in the last ~900 days: an
+"always up" call scores that. `edge_pp` = test accuracy minus `up_share`, in points.
+`shown_signal` is "no skill" when test accuracy is below 55% or does not beat `up_share`.
 `sharpe_adj` = published Sharpe ÷ √horizon (the published figure overlaps returns).
-These are single-split, no-baseline numbers: treat them as context, not as trade calls._
+Accuracy comes from one split on the model author's own test window: treat it as context, not as trade calls._
 {% else %}
 _{{ model_note }}_
 {% endif %}
@@ -169,5 +187,14 @@ _A sharp drop vs the 90-day average at Hormuz / Bab el-Mandeb / Suez is a supply
 {% if imf_macro is defined and not imf_macro.empty %}
 ## IMF macro (configured indicators)
 {{ imf_macro | md }}
+{% endif %}
+{% endmacro %}
+
+{% macro notes_block() %}
+{% if notes %}
+## Data notes for this run
+{% for n in notes %}
+- {{ n | plain }}
+{% endfor %}
 {% endif %}
 {% endmacro %}

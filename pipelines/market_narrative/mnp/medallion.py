@@ -5,16 +5,24 @@ names. Your notebook's connector cell provides `read(name, ...)` and `tables()`;
 the pipeline which of your datasets plays which role:
 
     from mnp import medallion
-    medallion.register(read, tables, datasets={
+    medallion.register(read, tables)             # roles are matched to your dataset names by pattern
+    medallion.register(read, tables, datasets={  # ... or name them yourself (overrides the match)
         "calendar": "<your economic-calendar dataset>",
-        "carry":    "<your FX carry dataset>",          # optional
-        "candles":  "<your hourly FX candles dataset>",  # optional
+        "carry":    "<your FX carry dataset>",
+        "candles":  "<your hourly FX candles dataset>",
+        "yields":   "<your government-bond yields dataset>",
+        "positioning": "<your per-pair COT positioning dataset>",
     })
 
 Expected columns:
-  calendar  date, title, currency, impact [, source, forecast, previous, event, family, event_p]
-  carry     pair, date, carry [, carry_z*, *momentum*]
-  candles   time, pair, close
+  calendar     date (or release_ts_utc), title, currency, impact
+               [, source, actual, forecast, previous, event, family, event_p]
+  carry        pair, date, carry [, carry_z*, *momentum*]
+  candles      time, pair, close
+  yields       date, <cc>_10y [, <cc>_2y]     one row per day, cc = us, de, jp, gb, ch ...
+  positioning  pair, report_date, institutional_bias [, bias_direction, is_current, report_age_days]
+
+Nothing is downloaded at registration: a dataset is read the first time a section needs it.
 
 Calendar handling:
   * rows whose `source` does not start with "forex" are dropped (observation dates, not releases)
@@ -26,6 +34,7 @@ Calendar handling:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date
 
 import pandas as pd
@@ -36,12 +45,50 @@ _tables = None
 _datasets: dict[str, str] = {}
 
 
-def register(read, tables=None, datasets: dict[str, str] | None = None) -> None:
-    """Hand the pipeline your notebook's `read(name, ...)`, optional `tables()`, and a
-    role -> dataset-name map (roles: calendar, carry, candles)."""
+# role -> name patterns, most specific first. The shortest matching dataset name wins.
+_ROLE_PATTERNS = {
+    "calendar": [r"^calendar.*event", r"^econ.*calendar", r"calendar"],
+    "carry": [r"^carry", r"carry"],
+    "candles": [r"^candles?_?1h$", r"^candles?.*1h"],
+    "yields": [r"bond.*yield", r"^yields?"],
+    "positioning": [r"cot.*pair", r"pair.*(cot|positioning)"],
+}
+
+
+def match_roles(names: list[str]) -> dict[str, str]:
+    """Pick a dataset for each role from a list of dataset names, by name pattern only."""
+    out = {}
+    for role_, patterns in _ROLE_PATTERNS.items():
+        for pat in patterns:
+            hits = sorted((n for n in names if re.search(pat, n, re.I)), key=lambda n: (len(n), n))
+            if hits:
+                out[role_] = hits[0]
+                break
+    return out
+
+
+def register(read, tables=None, datasets: dict[str, str] | None = None) -> dict[str, str]:
+    """Hand the pipeline your notebook's `read(name, ...)` and `tables()`.
+
+    Roles (calendar, carry, candles, yields, positioning) are matched to your dataset names by
+    pattern; `datasets` overrides any of them, and a role set to "" or None is switched off.
+    Returns the role -> dataset map in use.
+    """
     global _read, _tables, _datasets
-    _read, _tables, _datasets = read, tables, dict(datasets or {})
+    _read, _tables = read, tables
+    found = {}
+    if tables is not None:
+        try:
+            found = match_roles(list(tables()))
+        except Exception as e:  # noqa: BLE001
+            log.warning("could not list your datasets to match roles: %s: %s", type(e).__name__, str(e)[:160])
+    _datasets = {k: v for k, v in {**found, **(datasets or {})}.items() if v}
     log.info("private data reader registered; roles: %s", sorted(_datasets))
+    return dict(_datasets)
+
+
+def roles() -> dict[str, str]:
+    return dict(_datasets)
 
 
 def role(name: str) -> str | None:
@@ -69,15 +116,20 @@ def dataset(name: str | None, **kw) -> pd.DataFrame:
 def calendar(start: date, end: date, currencies: list[str] | None = None,
              impacts: tuple[str, ...] = ("high",), min_label_p: float = 0.7) -> pd.DataFrame:
     """Scheduled releases in [start, end]: date, event (title), currency, impact, event_code,
-    family, forecast, previous. Empty if the reader is not registered."""
+    family, forecast, previous. Empty if the reader is not registered.
+    """
     df = dataset(role("calendar"))
+    if not df.empty and "date" not in df and "release_ts_utc" in df:
+        df = df.rename(columns={"release_ts_utc": "date"})
     if df.empty or not {"date", "title", "currency"} <= set(df.columns):
+        if not df.empty:
+            log.warning("your calendar dataset lacks date / title / currency columns, so it is not used")
         return pd.DataFrame()
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
     lo, hi = pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC") + pd.Timedelta(days=1)
     df = df[(df["date"] >= lo) & (df["date"] < hi)]
-    if "source" in df:
+    if "source" in df and df["source"].astype(str).str.lower().str.startswith("forex").any():
         df = df[df["source"].astype(str).str.lower().str.startswith("forex")]
     if "impact" in df:
         df = df[df["impact"].astype(str).str.lower().isin([i.lower() for i in impacts])]
@@ -95,7 +147,7 @@ def calendar(start: date, end: date, currencies: list[str] | None = None,
     out = pd.DataFrame({
         "date": df["date"], "currency": df["currency"], "event": df["title"].astype(str),
         "impact": df.get("impact"), "event_code": code, "family": fam,
-        "forecast": df.get("forecast"), "previous": df.get("previous"),
+        "forecast": df.get("forecast"), "previous": df.get("previous"), "actual": df.get("actual"),
     })
     # one decision = several rows (rate, statement, votes): keep one per currency/timestamp/code
     labelled = out["event_code"].notna().to_numpy(dtype=bool)
@@ -128,3 +180,80 @@ def carry(pairs: list[str] | None = None) -> pd.DataFrame:
         df = df[df["pair"].isin(pairs)]
     keep = [c for c in df.columns if c in ("pair", "date", "carry") or c.startswith("carry_z") or "momentum" in c]
     return df[keep].set_index("pair").sort_index()
+
+
+def global_yields(asof: date | None = None, base: str = "us", max_age_days: int = 10) -> pd.DataFrame:
+    """10Y government yields by country from the `yields` role: level, 1-week and 1-month change
+    in bp, spread to the base country, and each country's own 2s10s where a 2Y column exists.
+
+    Countries whose last value is more than `max_age_days` older than the newest row are left
+    out, so a series that stopped updating cannot pass as current. `attrs["asof"]` is the date
+    of the newest row.
+    """
+    df = dataset(role("yields"))
+    if df.empty or "date" not in df:
+        return pd.DataFrame()
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce").dt.tz_localize(None)
+    df = df.dropna(subset=["date"]).drop_duplicates("date", keep="last").set_index("date").sort_index()
+    if asof is not None:
+        df = df[df.index <= pd.Timestamp(asof) + pd.Timedelta(days=1)]
+    tens = {m.group(1): c for c in df.columns if (m := re.fullmatch(r"([a-z]{2})_10y", str(c)))}
+    if df.empty or not tens:
+        return pd.DataFrame()
+    newest = df.index[-1]
+
+    def at(s: pd.Series, days: int):
+        past = s[s.index <= s.index[-1] - pd.Timedelta(days=days)]
+        return past.iloc[-1] if len(past) else float("nan")
+
+    rows = {}
+    for cc, col in tens.items():
+        s = pd.to_numeric(df[col], errors="coerce").dropna()
+        if s.empty or (newest - s.index[-1]).days > max_age_days:
+            continue
+        row = {"10y_%": s.iloc[-1], "chg_1w_bp": (s.iloc[-1] - at(s, 7)) * 100, "chg_1m_bp": (s.iloc[-1] - at(s, 30)) * 100}
+        two = pd.to_numeric(df[f"{cc}_2y"], errors="coerce").dropna() if f"{cc}_2y" in df else pd.Series(dtype=float)
+        row["2s10s_bp"] = (s.iloc[-1] - two.iloc[-1]) * 100 if len(two) and (newest - two.index[-1]).days <= max_age_days else float("nan")
+        row["as_of"] = s.index[-1].date().isoformat()
+        rows[cc.upper()] = row
+    if not rows:
+        return pd.DataFrame()
+    t = pd.DataFrame(rows).T
+    num = ["10y_%", "chg_1w_bp", "chg_1m_bp", "2s10s_bp"]
+    t[num] = t[num].astype(float)
+    if base.upper() in t.index:
+        t.insert(3, f"vs_{base.upper()}_bp", (t["10y_%"] - t.loc[base.upper(), "10y_%"]) * 100)
+        t = pd.concat([t.loc[[base.upper()]], t.drop(index=base.upper()).sort_values("10y_%", ascending=False)])
+    t = t.round({"10y_%": 2, "chg_1w_bp": 0, "chg_1m_bp": 0, "2s10s_bp": 0, f"vs_{base.upper()}_bp": 0})
+    if t["2s10s_bp"].isna().all():
+        t = t.drop(columns="2s10s_bp")
+    t.attrs["asof"] = newest.date()
+    if asof is not None and (pd.Timestamp(asof) - newest).days > max_age_days:
+        log.warning("your yields dataset ends %s: the global yields table is %d days old",
+                    newest.date(), (pd.Timestamp(asof) - newest).days)
+    return t
+
+
+def positioning(pairs: list[str] | None = None, top: int = 6) -> pd.DataFrame:
+    """Latest COT-derived positioning per FX pair from the `positioning` role. Shows `pairs`
+    when given and present, otherwise the `top` pairs with the largest absolute bias.
+    """
+    df = dataset(role("positioning"))
+    if df.empty or not {"pair", "report_date"} <= set(df.columns):
+        return pd.DataFrame()
+    df = df.sort_values("report_date").groupby("pair").tail(1)
+    if "is_complete" in df:
+        df = df[df["is_complete"].astype(bool)]
+    bias = next((c for c in ("institutional_bias", "bias", "net_bias") if c in df), None)
+    sel = df[df["pair"].isin(pairs)] if pairs else df.iloc[0:0]
+    if sel.empty and bias:
+        sel = df.reindex(df[bias].abs().sort_values(ascending=False).index).head(top)
+    if sel.empty:
+        return pd.DataFrame()
+    keep = [c for c in ("pair", bias, "bias_direction", "base_index", "quote_index", "report_age_days", "report_date") if c and c in sel]
+    t = sel[keep].copy()
+    t["report_date"] = pd.to_datetime(t["report_date"], utc=True, errors="coerce").dt.strftime("%Y-%m-%d")
+    for c in t.select_dtypes("float").columns:
+        t[c] = t[c].round(2)
+    return t.set_index("pair")

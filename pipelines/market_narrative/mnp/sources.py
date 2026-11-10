@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import io
 import logging
-import os
 import re
 from datetime import date, timedelta
 
@@ -17,7 +15,9 @@ _SECRET = re.compile(r"(?i)(api_?key|token|secret|password)=[^&\s]+")
 
 
 def _obb():
-    from openbb import obb  # imported lazily so the module loads without openbb installed
+    from openbb import (
+        obb,  # imported lazily so the module loads without openbb installed
+    )
 
     obb.user.preferences.output_type = "dataframe"
     try:
@@ -102,22 +102,28 @@ def earnings_calendar(start: date, end: date, provider: str) -> pd.DataFrame:
 
 def econ_calendar(start: date, end: date, providers: list[str] | str,
                   auction_terms: list[str] | None = None, currencies: list[str] | None = None,
-                  impacts: list[str] | None = None) -> pd.DataFrame:
-    """Union of calendars. `medallion` is your own calendar dataset (see medallion.py);
-    `fred_rest` and `treasury_auctions` are direct REST (see rest.py); any other name is an
-    OpenBB `economy.calendar` provider (fmp, tradingeconomics)."""
+                  impacts: list[str] | None = None, extra: list[str] | None = None,
+                  fred_include: list[str] | None = None) -> pd.DataFrame:
+    """The week's calendar. `providers` are tried in order and the FIRST one that returns rows
+    is used (two calendars side by side list every release twice). `extra` sources are always
+    added on top (auctions are not in most calendars).
+
+    `medallion` is your own calendar dataset (see medallion.py); `benzinga`, `fred_rest` and
+    `treasury_auctions` are direct REST (see rest.py); any other name is an OpenBB
+    `economy.calendar` provider (fmp, tradingeconomics).
+    """
     from . import rest
 
-    providers = [providers] if isinstance(providers, str) else providers
-    frames = []
-    for p in providers:
+    def one(p: str) -> pd.DataFrame:
         try:  # a calendar source must never stop the run
             if p == "medallion":
                 from . import medallion
 
                 df = medallion.calendar(start, end, currencies, tuple(impacts or ("high",)))
+            elif p == "benzinga":
+                df = rest.benzinga_calendar(start, end, currencies, 3 if list(impacts or ["high"]) == ["high"] else 2)
             elif p == "fred_rest":
-                df = rest.fred_release_calendar(start, end)
+                df = rest.fred_release_calendar(start, end, include=fred_include)
             elif p == "treasury_auctions":
                 df = rest.treasury_auctions(start, end, auction_terms)
             else:
@@ -125,9 +131,18 @@ def econ_calendar(start: date, end: date, providers: list[str] | str,
                 df = df.reset_index() if not df.empty else df
         except Exception as e:  # noqa: BLE001
             log.warning("calendar source %s skipped: %s: %s", p, type(e).__name__, _SECRET.sub(r"\1=***", str(e))[:200])
-            continue
+            return pd.DataFrame()
+        return df.assign(calendar_source=p) if not df.empty else df
+
+    providers = [providers] if isinstance(providers, str) else list(providers)
+    extra = list(extra or [])
+    frames = []
+    for p in [p for p in providers if p not in extra]:
+        df = one(p)
         if not df.empty:
-            frames.append(df.assign(calendar_source=p))
+            frames.append(df)
+            break
+    frames += [df for df in (one(p) for p in extra) if not df.empty]
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 

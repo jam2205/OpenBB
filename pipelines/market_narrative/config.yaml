@@ -38,17 +38,40 @@ openbb:
   transcript_provider: fmp           # earnings-call transcripts: FMP paid plans only (402 on free/starter)
   mdna_provider: sec                 # MD&A from SEC filings, free, no key
   earnings_provider: fmp             # needs FMP key; pipeline degrades gracefully without it
-  # fred_rest = FRED API releases/dates (your FRED key, one call). treasury_auctions = FiscalData (no key).
-  # fmp / tradingeconomics = OpenBB providers that need a paid plan; add them here if you upgrade.
-  # medallion = your own calendar dataset (needs your connector cell + medallion.register).
-  econ_calendar_providers: [medallion, fred_rest, treasury_auctions]
+  # Tried in order; the FIRST that returns rows is used (two calendars would list each release twice).
+  #   medallion = your own calendar dataset (needs your connector cell + medallion.register)
+  #   benzinga  = Benzinga economic calendar (BENZINGA_API_KEY): times, consensus, prior, actual
+  #   fred_rest = FRED release dates (FRED_API_KEY): dates only, US only; last resort
+  #   fmp / tradingeconomics = OpenBB providers that need a paid plan; add them here if you upgrade
+  econ_calendar_providers: [medallion, benzinga, fred_rest]
+  # Always added on top. treasury_auctions = FiscalData, then TreasuryDirect (no key).
+  econ_calendar_extra: [treasury_auctions]
   auction_terms: [10-Year, 20-Year, 30-Year]   # which coupon auctions make it a "bond week"
 
 # Your own economic calendar (the dataset registered under the `calendar` role).
 calendar:
   currencies: [USD, EUR, JPY, GBP, CHF, NZD, AUD, CAD]   # whose events count
   impacts: [high]                                        # add "medium" for a busier table
-  max_rows: 30
+  max_rows: 40
+  # FRED calls every dataset it hosts a "release" (research papers, six CPI variants), so only
+  # these exact release names count when the FRED calendar is used.
+  fred_releases:
+    - Consumer Price Index
+    - Producer Price Index
+    - Employment Situation
+    - Gross Domestic Product
+    - Personal Income and Outlays
+    - Advance Monthly Sales for Retail and Food Services
+    - Unemployment Insurance Weekly Claims Report
+    - Job Openings and Labor Turnover Survey
+    - G.17 Industrial Production and Capacity Utilization
+    - New Residential Construction
+    - New Residential Sales
+    - Existing Home Sales
+    - Surveys of Consumers
+    - U.S. Import and Export Price Indexes
+    - Employment Cost Index
+    - Monthly Treasury Statement
 
 # FRED (key): daily/weekly US macro that drives cross-asset moves. Shown with 1w / 1m changes.
 fred:
@@ -67,7 +90,9 @@ fmp:
   enabled: true
   max_cards: 3
   always_cards: []            # tickers to card every week even when they are not reporting
-  us_indicators: [CPI, federalFunds, unemploymentRate, totalNonfarmPayroll, initialClaims,
+  # federalFunds is left out on purpose: FMP's monthly figure moved 3.75 -> 3.88 in a month when
+  # the daily rate (DFF, in the FRED table) did not move. Use the FRED table for the policy rate.
+  us_indicators: [CPI, unemploymentRate, totalNonfarmPayroll, initialClaims,
                   retailSales, consumerSentiment]
 
 # Swiss National Bank data portal (data.snb.ch): no key. Adds the Switzerland / CHF section.

@@ -45,3 +45,19 @@ def corr_shift(rets: pd.DataFrame, anchor: str, window: int) -> pd.DataFrame:
     df["shift"] = df["corr_recent"] - df["corr_full"]
     df["flag"] = df["shift"].abs() > 0.3
     return df.sort_values("shift", key=abs, ascending=False)
+
+
+def pair_corr(rets: pd.DataFrame, a: str | None, b: str | None, window: int) -> tuple[float, float] | None:
+    """(recent, full-sample) correlation of two return series; None if either is missing."""
+    if not a or not b or a not in rets or b not in rets:
+        return None
+    j = rets[[a, b]].dropna()
+    if len(j) <= window:
+        return None
+    return float(j.tail(window).corr().iloc[0, 1]), float(j.corr().iloc[0, 1])
+
+
+def up_share(close: pd.Series, horizon: int) -> float:
+    """Share of h-day periods that ended higher: what "always predict up" scores on direction."""
+    r = close.dropna().pct_change(horizon).dropna()
+    return float((r > 0).mean()) if len(r) else float("nan")

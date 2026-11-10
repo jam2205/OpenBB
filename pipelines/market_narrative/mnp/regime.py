@@ -20,7 +20,6 @@ def detect(cfg: dict, econ: pd.DataFrame, earnings: pd.DataFrame, window: tuple 
         reporters = sorted(set(earnings["symbol"]) & focus)
 
     col = _event_col(econ) if not econ.empty else None
-    events_all = econ[col].astype(str).tolist() if col else []
 
     matches = []
     for rule in cfg["regimes"]:
@@ -37,7 +36,14 @@ def detect(cfg: dict, econ: pd.DataFrame, earnings: pd.DataFrame, window: tuple 
                         day = pd.Timestamp(r.date).strftime("%a %d") if pd.notna(r.date) else ""
                         hits.append(f"{getattr(r, 'currency', '') or ''} {r.event} ({day})".strip())
             # Keyword matching is for unlabelled sources only (FRED, paid calendars).
-            hits += [e for e in events_all if e not in labelled and any(k.lower() in e.lower() for k in (kws or []))]
+            if kws and col:
+                for r in econ.itertuples():
+                    name = str(getattr(r, col))
+                    if name in labelled or not any(k.lower() in name.lower() for k in kws):
+                        continue
+                    ccy, when = getattr(r, "currency", None), getattr(r, "date", None)
+                    day = pd.Timestamp(when).strftime("%a %d") if when is not None and pd.notna(when) else ""
+                    hits.append(" ".join(x for x in (ccy if isinstance(ccy, str) else "", name, f"({day})" if day else "") if x))
             # Explicit dated events (e.g. central-bank decisions): {"2026-12-09": "FOMC decision"}
             if window and rule.get("dates"):
                 for d, label in rule["dates"].items():

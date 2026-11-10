@@ -36,15 +36,17 @@ python -m mnp.run --out reports            # add --no-nlp / --no-model to skip h
 | `HF_TOKEN` | optional | higher HuggingFace download rate limits |
 | `BENZINGA_API_KEY` | optional | world/macro news feed |
 
-The economic calendar comes from direct REST calls (`mnp/rest.py`): FRED's `releases/dates` API with your FRED key, and upcoming Treasury auctions from FiscalData with no key. OpenBB's own FRED calendar scrapes the FRED website and times out, so it is not used. Known limits, verified live on 2026-11-10: FRED lists releases that hold daily series (such as "FOMC Press Release") on every day, so those are filtered out and central-bank decision days come from the dated list in `config.yaml → regimes`. FiscalData's upcoming-auctions feed can lag by weeks, in which case no auction events are added and a warning is logged. IMF PortWatch's public server now requires a token, so the chokepoint section is off by default. When several week types apply (say CPI week plus an NVDA print), the first rule in `config.yaml → regimes` picks the template and the header lists the others. Earnings weeks use FMP's earnings calendar. MD&A text comes from SEC filings (free). Transcripts need a paid FMP plan and are skipped otherwise. API keys are masked in all log output. The notebook accepts common alternative secret names; see `ALIASES` in its second cell.
+The economic calendar is the first of these that returns rows (`config.yaml → econ_calendar_providers`): your own calendar dataset, then Benzinga's economic calendar (`BENZINGA_API_KEY`; release times, consensus, prior, actual), then FRED's `releases/dates` API as a last resort. Only one is used, because two calendars side by side list every release twice. Treasury auctions are always added on top, from FiscalData and, when that is stale, TreasuryDirect (no key; the TreasuryDirect call has not been run live yet). OpenBB's own FRED calendar scrapes the FRED website and times out, so it is not used. Known limits: FRED gives dates without times and calls every dataset it hosts a "release", so only the release names listed under `config.yaml → calendar.fred_releases` count; central-bank decision days come from the dated list in `config.yaml → regimes`. Benzinga's response does not state a timezone; US Eastern is assumed. Anything missing or stale in a run is listed under "Data notes for this run" at the end of the report. IMF PortWatch's public server now requires a token, so the chokepoint section is off by default. When several week types apply (say CPI week plus an NVDA print), the first rule in `config.yaml → regimes` picks the template and the header lists the others. Earnings weeks use FMP's earnings calendar. MD&A text comes from SEC filings (free). Transcripts need a paid FMP plan and are skipped otherwise. API keys are masked in all log output. The notebook accepts common alternative secret names; see `ALIASES` in its second cell.
 In Colab, store keys under Secrets (🔑). The notebook copies them into the environment and OpenBB.
 
 ## Your own data
 `mnp/medallion.py` lets the pipeline read datasets from your private store through whatever
-connector cell your notebook already uses. Register the reader and say which dataset plays which role:
+connector cell your notebook already uses. Register the reader; each role is matched to one of your
+datasets by name pattern, and you can override any of them:
 
 ```python
-medallion.register(read, tables, datasets={"calendar": "...", "carry": "...", "candles": "..."})
+medallion.register(read, tables)                                # returns {role: dataset}
+medallion.register(read, tables, datasets={"calendar": "..."})  # choose one yourself; "" switches a role off
 ```
 
 | Role | Used for |
@@ -52,8 +54,10 @@ medallion.register(read, tables, datasets={"calendar": "...", "carry": "...", "c
 | `calendar` | Week detection and the "This week's scheduled events" table. `RATE_DECISION` rows make a central-bank week; high-impact `inflation` / `labour` / `auction` rows make a bond week |
 | `carry` | FX carry table (policy-rate differentials) |
 | `candles` | Daily closes for pairs listed under `universe.fx_minio` |
+| `yields` | "Global 10Y yields": level, 1-week and 1-month change, spread to the US and 2s10s per country. A country whose series stopped updating is left out |
+| `positioning` | "FX positioning (COT)": latest institutional bias per pair, with the report's age |
 
-No addresses, bucket names or dataset names live in this repository. If the calendar has no `actual`
+No addresses, bucket names or credentials live in this repository, and nothing is downloaded until a section needs it. If the calendar has no `actual`
 values, the report shows forecast and previous but cannot compute a surprise.
 
 ## Swiss National Bank
@@ -75,7 +79,7 @@ evidence: `mnp/fmp_probe.py` asks each endpoint once (`probe()` for 46 core ones
 | In the report | From |
 |---|---|
 | **Earnings card** for each focus name reporting this week: next date with EPS and revenue expected, actual-vs-estimate history, quarterly results, consensus for coming fiscal years, analyst ratings and price targets, rating counts by month, upgrades and downgrades, quality scores (Altman Z, Piotroski), valuation and DCF, revenue by product and geography, peers, recent filings | earnings, income-statement, analyst-estimates, grades*, price-target*, financial-scores, ratios-ttm, key-metrics-ttm, discounted-cash-flow, revenue-*-segmentation, stock-peers, sec-filings-search |
-| **US data scorecard**: latest released print of CPI, Fed funds, unemployment, payrolls, claims, retail sales, sentiment | economic-indicators |
+| **US data scorecard**: latest released print of CPI, unemployment, payrolls, claims, retail sales, sentiment (the policy rate is in the FRED table; FMP's monthly figure disagreed with it) | economic-indicators |
 | **Sector moves and valuation**, best and worst industries | sector-/industry-performance-snapshot, sector-pe-snapshot |
 
 Cards appear in every report type, so an earnings name is not lost in a macro week. Not on that
@@ -87,9 +91,9 @@ Benzinga is the only keyed news source here (FMP's news is not on a Starter-leve
 the tone and driver models read and what any fine-tuning set would be built from.
 `mnp/benzinga_probe.py` checks the key before you train: endpoints served, how far back news goes,
 whether articles have bodies, which channels and tags they carry, FX / commodity / rates coverage,
-and whether the economic calendar has `actual` and `consensus`. It has not been run against a live
-key yet (the API only takes the key as a URL parameter), so treat a `missing` result as a possible
-wrong path rather than missing data.
+and whether the economic calendar has `actual` and `consensus`. First live run 2026-11-10: news
+goes back 10 years, 86% of articles have a body, and the economic calendar had actual and consensus
+for 37% of events, so it now feeds the report's calendar (`rest.benzinga_calendar`).
 
 ## Where to extend
 | Want to… | Edit |
@@ -105,7 +109,7 @@ wrong path rather than missing data.
   models forecast returns 1, 5 and 21 days ahead. The pipeline runs the repo's own feature code on OpenBB OHLCV.
   Caveats from reviewing its code:
   - The published Sharpe overlaps h-day returns, which inflates it by about √h. The report shows `sharpe_adj` = Sharpe/√h instead (SPY 21-day: 7.2 → ~1.6).
-  - Its accuracy comes from one 70/15/15 split with no purge gap and no buy-and-hold baseline, so treat it as an upper bound.
+  - Its accuracy comes from one 70/15/15 split with no purge gap and no buy-and-hold baseline, so treat it as an upper bound. The report adds a baseline itself: `up_share`, how often the asset rose over that horizon in the fetched history. A signal is shown only when test accuracy is at least 55% and above `up_share`.
   - **GLD, SLV and USO test below 50% directional accuracy**, so they display as "no skill". Use the cross-asset and NLP sections for metals.
   - The model files are pickles, so loading them runs code from that repo. Pin `predictive.revision` to a reviewed commit.
 - **Models (all pre-trained, no training needed):**

@@ -14,8 +14,9 @@ Run this BEFORE building a training set. It answers:
     report = probe()          # about 45 requests; prints a summary and returns the tables
 
 The key is read from BENZINGA_API_KEY, sent as the `token` URL parameter (the only form the API
-accepts), and never printed. Written from the public API description and NOT yet run against a
-live key: a `missing` status may mean a path here is wrong, not that the data does not exist.
+accepts), and never printed. First run against a live key on 2026-11-10: news, the removed feed
+and every calendar answered; the channels list and logo search returned HTTP 400 and transcripts
+503, so those three paths or parameters are still unconfirmed.
 """
 
 from __future__ import annotations
@@ -176,7 +177,9 @@ def probe(tickers: tuple[str, ...] = ("NVDA", "AAPL", "SPY", "QQQ", "GLD"), api_
                                                             "Global", "Futures", "Cryptocurrency")]
     queries += [(f"topic {t}", {"topics": t}) for t in ("gold", "yen", "Swiss franc", "inflation", "tariffs")]
     for label, q in queries:
-        status, data = _call("/api/v2/news", key, pageSize=100, dateFrom=d(30), displayOutput="headline", **q)
+        # sort is explicit: without it a date-filtered query came back oldest-first, so "newest" showed
+        # the start of the window (seen on the first live run, 2026-11-10).
+        status, data = _call("/api/v2/news", key, pageSize=100, dateFrom=d(30), displayOutput="headline", sort="created:desc", **q)
         items = _rows(data)
         cover.append({"query": label, "status": status, "articles, last 30d (max 100)": len(items),
                       "newest": (items[0].get("created", "")[:16] if items else ""), "example": (items[0].get("title", "")[:70] if items else "")})

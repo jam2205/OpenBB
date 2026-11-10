@@ -18,21 +18,17 @@
 {% endif %}
 {% if f.doc_tone %}
 **{{ sym }}: management language**
+
 | Document | Net tone | % negative chunks | Chunks | Method |
 |---|---:|---:|---:|---|
 {% for name, d in f.doc_tone.items() %}
 | {{ name }} | {{ "%+.2f" | format(d.net_tone) if d.net_tone == d.net_tone else "n/a" }} | {{ "%.0f%%" | format(100 * d.pct_negative) if d.pct_negative is defined else "n/a" }} | {{ d.chunks }} | {{ d.method }} |
 {% endfor %}
 {% for name, d in f.doc_tone.items() if d.most_negative is defined %}
-- *{{ name }}, most cautious passage:* "{{ d.most_negative }}…"
+- *{{ name }}, most cautious passage:* "{{ d.most_negative | plain }}…"
 {% endfor %}
-{% endif %}
-{% endfor %}
-{% for name, d in f.doc_tone.items() if d.most_negative is defined %}
-- *{{ name }}, most cautious passage:* "{{ d.most_negative }}…"
-{% endfor %}
-{% endif %}
 
+{% endif %}
 {% endfor %}
 {{ c.calendar_block() }}
 {{ c.cards_block() }}
@@ -42,6 +38,7 @@
 ## What to watch
 - Reaction asymmetry: net news tone into the print is {{ "%+.2f" | format(earnings_tone) }}; a beat against negative tone has more room to rerate than a beat already priced in by positive tone.
 - Index spillover: check the correlation of reporters to `{{ anchor }}` above. A high recent correlation means the print moves the index.
-- Rates sensitivity: the 10Y move this week is {{ y10_move }}. Long-duration names react more to yields than to the earnings number itself.
+- Rates sensitivity: the 10Y moved {{ y10_move }} over the five sessions to {{ y10_day or 'n/a' }}. Long-duration names react more to yields than to the earnings number itself.
 {{ c.global_block() }}
 {{ c.model_block() }}
+{{ c.notes_block() }}

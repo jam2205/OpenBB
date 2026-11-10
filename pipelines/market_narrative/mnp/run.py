@@ -11,9 +11,12 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from . import correlations as corr
-from . import regime as rg
-from . import report, sources
+from . import (
+    correlations as corr,
+    regime as rg,
+    report,
+    sources,
+)
 
 log = logging.getLogger("mnp")
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,14 +45,37 @@ def _guard(name: str, fn, default):
 
 
 def _rates_section(asof):
+    """(table of the last sessions, 2s10s, 10Y change over five sessions, date of the last row).
+
+    The weekly move is taken from this same table, so the line under it cannot disagree with it.
+    """
     rates = sources._safe(sources._obb().fixedincome.government.treasury_rates,
-                          start_date=asof - timedelta(days=14), provider="federal_reserve")
-    curve = "n/a"
+                          start_date=asof - timedelta(days=21), provider="federal_reserve")
+    curve, move, last_day = "n/a", None, None
     if not rates.empty and {"year_2", "year_10"} <= set(rates.columns):
+        rates = rates.dropna(subset=["year_10"])
         last = rates.iloc[-1]
         curve = _fmt_bp((last["year_10"] - last["year_2"]) * 100)  # provider returns decimals
-        rates = (rates[[c for c in ("month_3", "year_2", "year_5", "year_10", "year_30") if c in rates]].tail(5) * 100).round(2)
-    return rates, curve
+        if len(rates) > 5:
+            move = _fmt_bp((last["year_10"] - rates["year_10"].iloc[-6]) * 100)
+        last_day = str(rates.index[-1])[:10]
+        rates = (rates[[c for c in ("month_3", "year_2", "year_5", "year_10", "year_30") if c in rates]].tail(6) * 100).round(2)
+        rates.index = [str(i)[:10] for i in rates.index]
+        rates.index.name = "date"
+    return rates, curve, move, last_day
+
+
+class _Notes(logging.Handler):
+    """Collects this run's warnings so the report can list what is missing or stale."""
+
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self.items: list[str] = []
+
+    def emit(self, record):
+        msg = sources._SECRET.sub(r"\1=***", record.getMessage()).strip().splitlines()
+        if msg and msg[0] not in self.items:
+            self.items.append(msg[0][:300])
 
 
 def _fred_section(cfg, prices, gold, start):
@@ -102,14 +128,50 @@ def _fundamentals_section(symbols, ob, nlp):
     return funds
 
 
+def _with_baseline(pred: pd.DataFrame, bars: dict) -> pd.DataFrame:
+    """Add the always-long baseline and withdraw signals that do not beat it.
+
+    `up_share` is the share of h-day periods that rose in the price history fetched for this
+    run. A model that always says "up" scores that on direction, so a test accuracy at or below
+    it shows no skill, whatever its level. The baseline window is not the model's own test
+    window (the model repo does not publish one), so read `edge_pp` as indicative.
+    """
+    from .predictive import SKILL_MIN
+
+    def base(r):
+        df = bars.get(r["ticker"])
+        return corr.up_share(df["close"], int(r["horizon_d"])) if df is not None and not df.empty and "close" in df else np.nan
+
+    p = pred.copy()
+    p["up_share"] = p.apply(base, axis=1)
+    p["edge_pp"] = (p["test_dir_acc"] - p["up_share"]) * 100
+    weak = (p["test_dir_acc"] < SKILL_MIN) | (p["edge_pp"] <= 0)
+    p = p.drop(columns="shown_signal")
+    p["shown_signal"] = p["model_signal"].where(~weak, "no skill")   # last column: the one to read
+    p.insert(2, "pred_return_%", p.pop("pred_return") * 100)
+    for c, n in (("pred_return_%", 2), ("test_dir_acc", 2), ("up_share", 2), ("edge_pp", 1), ("sharpe_adj", 2)):
+        p[c] = p[c].astype(float).round(n)
+    return p
+
+
 def _fmt_bp(x) -> str:
-    """x in percentage points (0.10 -> +10bp)."""
+    """X in percentage points (0.10 -> +10bp)."""
     return "n/a" if pd.isna(x) else f"{x * 100:+.0f}bp"
 
 
 def run(config: str | Path | None = None, asof: date | None = None, out_dir: str | Path = "reports",
         use_nlp: bool = True, use_model: bool = True) -> Path:
     cfg = load_config(config)
+    notes = _Notes()
+    logging.getLogger("mnp").addHandler(notes)
+    try:
+        return _run(cfg, asof, out_dir, use_nlp, use_model, notes)
+    finally:
+        logging.getLogger("mnp").removeHandler(notes)
+
+
+def _run(cfg: dict, asof: date | None, out_dir, use_nlp: bool, use_model: bool, notes: _Notes) -> Path:
+    report.quiet_progress()
     asof = asof or date.today()
     start = asof - timedelta(days=cfg["lookback_days"])
     u, ob = cfg["universe"], cfg["openbb"]
@@ -130,8 +192,9 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
     # 2. Regime from calendars
     w0, w1 = sources.window(asof)
     ccfg = cfg.get("calendar", {})
-    econ = sources.econ_calendar(w0, w1, ob.get("econ_calendar_providers", ["medallion", "fred_rest"]),
-                                 ob.get("auction_terms"), ccfg.get("currencies"), ccfg.get("impacts"))
+    econ = sources.econ_calendar(w0, w1, ob.get("econ_calendar_providers", ["medallion", "benzinga", "fred_rest"]),
+                                 ob.get("auction_terms"), ccfg.get("currencies"), ccfg.get("impacts"),
+                                 ob.get("econ_calendar_extra", ["treasury_auctions"]), ccfg.get("fred_releases"))
     earn = sources.earnings_calendar(w0, w1, ob["earnings_provider"])
     regime = _guard("regime", lambda: rg.detect(cfg, econ, earn, (w0, w1)),
                     {**cfg["regimes"][-1], "events": [], "reporters": [], "also": []})
@@ -142,14 +205,23 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
             return pd.DataFrame()
         t = econ.copy()
         t["date"] = pd.to_datetime(t["date"], utc=True, errors="coerce")
-        t["when (UTC)"] = t["date"].dt.strftime("%a %d %b %H:%M")
-        cols = [c for c in ("when (UTC)", "currency", "event", "impact", "forecast", "previous", "calendar_source") if c in t]
-        t = t.sort_values("date")[cols].fillna("").head(ccfg.get("max_rows", 30)).reset_index(drop=True)
-        return t.apply(lambda c: c.astype(str).str.replace("|", " / ", regex=False))  # "|" breaks markdown tables
+        # A source that knows only the day (FRED, auctions) shows the day, not a made-up 00:00.
+        dated_only = (t["date"].dt.hour == 0) & (t["date"].dt.minute == 0)
+        t["when (UTC)"] = t["date"].dt.strftime("%a %d %b %H:%M").where(~dated_only, t["date"].dt.strftime("%a %d %b"))
+        cols = [c for c in ("when (UTC)", "currency", "event", "impact", "forecast", "previous", "actual", "calendar_source") if c in t]
+        t = t.sort_values("date")[cols]
+        t = t.drop(columns=[c for c in ("forecast", "previous", "actual", "impact") if c in t and t[c].fillna("").astype(str).str.strip().eq("").all()])
+        cap = ccfg.get("max_rows", 40)
+        t.attrs["hidden"] = max(len(t) - cap, 0)
+        return t.head(cap).fillna("").astype(str).reset_index(drop=True)
 
     calendar_tbl = _guard("calendar table", _calendar_table, pd.DataFrame())
-    carry_tbl = _guard("carry", lambda: __import__("mnp.medallion", fromlist=["x"]).carry(
-        u.get("fx_openbb", []) + u.get("fx_minio", [])), pd.DataFrame())
+    from . import medallion
+
+    fx_pairs = u.get("fx_openbb", []) + u.get("fx_minio", [])
+    carry_tbl = _guard("carry", lambda: medallion.carry(fx_pairs), pd.DataFrame())
+    world_yields = _guard("global yields", lambda: medallion.global_yields(asof), pd.DataFrame())
+    cot_tbl = _guard("positioning", lambda: medallion.positioning(fx_pairs), pd.DataFrame())
 
     # 3. NLP over news
     driver_summary = pd.DataFrame()
@@ -181,9 +253,13 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
     if y10 in rets and gold in rets:
         r, f = rets[gold].tail(cfg["corr_window"]).corr(rets[y10]), rets[gold].corr(rets[y10])
         gold_y10 = f"{r:+.2f} / {f:+.2f}"
-    y10_move = _fmt_bp(prices[y10].ffill().diff(5).iloc[-1]) if y10 in prices else "n/a"
-
-    rates, curve = _guard("rates", lambda: _rates_section(asof), (pd.DataFrame(), "n/a"))
+    rates, curve, y10_move, y10_day = _guard("rates", lambda: _rates_section(asof), (pd.DataFrame(), "n/a", None, None))
+    if y10_move is None:   # no Treasury table: fall back to the market series in the snapshot
+        y10_move = _fmt_bp(prices[y10].ffill().diff(5).iloc[-1]) if y10 in prices else "n/a"
+        y10_day = str(prices[y10].dropna().index[-1])[:10] if y10 in prices and prices[y10].notna().any() else None
+    fx_vs_y10 = {p: corr.pair_corr(rets, p, y10, cfg["corr_window"]) for p in u.get("fx_openbb", []) if p.endswith("JPY")}
+    fx_vs_y10 = {p: v for p, v in fx_vs_y10.items() if v}
+    anchor_y10 = corr.pair_corr(rets, anchor, y10, cfg["corr_window"])
     fred_tbl, gold_real = _guard("fred", lambda: _fred_section(cfg, prices, gold, start), (pd.DataFrame(), "n/a"))
     icfg = cfg.get("imf", {})
     imf_macro = _guard("imf", lambda: sources.imf_indicators(
@@ -226,8 +302,11 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
             m = AcyLaModel(cfg["models"]["predictive"], mcfg.get("revision"), mcfg.get("use_lstm", False))
             hist_start = asof - timedelta(days=mcfg.get("history_days", 900))
             targets = [t for t in mcfg["tickers"] if t in COVERED]
-            predictions = m.predict_many({t: sources.ohlcv(t, hist_start, ob["price_provider"]) for t in targets})
+            bars = {t: sources.ohlcv(t, hist_start, ob["price_provider"]) for t in targets}
+            predictions = m.predict_many(bars)
             model_note = "no predictions returned" if predictions.empty else ""
+            if not predictions.empty:
+                predictions = _with_baseline(predictions, bars)
         except Exception as e:  # noqa: BLE001
             model_note = f"predictive model unavailable: {e}"
             predictions = None
@@ -241,10 +320,14 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         dominant_tone=float(dom.net_tone) if dom is not None else 0.0,
         top_headlines=top,
         driver_method=scored["driver_method"].iloc[0] if not scored.empty else "n/a", fundamentals=funds, earnings_tone=earnings_tone,
-        y10_move=y10_move, rates=rates, curve_2s10s=curve, gold_y10=gold_y10,
+        y10_move=y10_move, y10_day=y10_day, fx_vs_y10=fx_vs_y10, anchor_y10=anchor_y10, notes=notes.items,
+        world_yields=world_yields, world_yields_asof=world_yields.attrs.get("asof") if not world_yields.empty else None,
+        positioning=cot_tbl, calendar_hidden=calendar_tbl.attrs.get("hidden", 0) if not calendar_tbl.empty else 0,
+        rates=rates, curve_2s10s=curve, gold_y10=gold_y10,
         predictions=predictions, model_note=model_note,
         fred=fred_tbl, gold_real=gold_real, cards=cards, us_data=us_data, sectors=sectors, industries=industries,
-        sectors_asof=sectors.attrs.get("asof") if not sectors.empty else None, snb=snb_block, calendar_tbl=calendar_tbl, carry=carry_tbl,
+        sectors_asof=sectors.attrs.get("asof") if not sectors.empty else None,
+        sectors_exchange=sectors.attrs.get("exchange", "") if not sectors.empty else "", snb=snb_block, calendar_tbl=calendar_tbl, carry=carry_tbl,
         imf_macro=imf_macro.tail(20) if not imf_macro.empty else imf_macro, chokepoints=choke_tbl,
     )
     path = report.render(ctx, regime["template"], out_dir)

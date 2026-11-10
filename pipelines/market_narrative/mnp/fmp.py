@@ -48,7 +48,8 @@ CACHE_DIR = Path(os.environ.get("MNP_FMP_CACHE", Path.home() / ".cache" / "mnp_f
 
 def _cache_file(path: str, params: dict) -> Path:
     """One file per (endpoint, parameters, calendar day). Fundamentals do not change intraday,
-    so a second run on the same day costs no API calls."""
+    so a second run on the same day costs no API calls.
+    """
     raw = json.dumps([path, sorted((k, str(v)) for k, v in params.items())])
     return CACHE_DIR / date.today().isoformat() / (hashlib.sha1(raw.encode()).hexdigest()[:20] + ".json")
 
@@ -335,7 +336,8 @@ def ratings_trend(symbol: str) -> pd.DataFrame:
     buy = df["analystRatingsStrongBuy"] + df["analystRatingsBuy"]
     sell = df["analystRatingsSell"] + df["analystRatingsStrongSell"]
     tot = buy + df["analystRatingsHold"] + sell
-    t = pd.DataFrame({"buy": buy, "hold": df["analystRatingsHold"], "sell": sell, "buy_%": (buy / tot * 100).round(1)})
+    t = pd.DataFrame({"buy": buy.astype(int), "hold": df["analystRatingsHold"].astype(int), "sell": sell.astype(int),
+                      "buy_%": (buy / tot * 100).round(1)})
     t.index = pd.to_datetime(df["date"]).dt.strftime("%b %Y").values
     return t
 
@@ -452,6 +454,10 @@ def company_card(symbol: str, price: float | None = None) -> dict:
     card["ratings_trend"] = part("ratings trend", lambda: ratings_trend(symbol), pd.DataFrame())
     card["moves"] = part("price moves", lambda: price_moves(symbol), pd.DataFrame())
     card["peers"] = part("peers", lambda: peers(symbol), pd.DataFrame())
+    # The consensus file and the monthly counts are two FMP datasets that disagree (60/16/3 against
+    # 59/3/1 for one name on 2026-11-10). Show one: the monthly table, which also carries the trend.
+    if not card["ratings_trend"].empty and not card["street"].empty:
+        card["street"] = card["street"].drop(index=["Buy / hold / sell", "% buy"], errors="ignore")
     card["segment_year"] = card["products"].attrs.get("fiscal_year") if isinstance(card["products"], pd.DataFrame) else None
     return card
 
@@ -483,6 +489,7 @@ def sector_snapshot(asof: date, exchange: str = "NASDAQ") -> pd.DataFrame:
             t["pe"] = pe.groupby("sector")["pe"].mean()
         t = t.sort_values("avg_change_%", ascending=False).round(2)
         t.attrs["asof"] = d
+        t.attrs["exchange"] = exchange if "exchange" in perf and (perf["exchange"] == exchange).any() else "all exchanges"
         return t
     return pd.DataFrame()
 

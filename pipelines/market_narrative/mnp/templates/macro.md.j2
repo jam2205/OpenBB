@@ -3,7 +3,7 @@
 ## Rates & curve (US Treasury, %)
 {{ rates | md }}
 
-**10Y weekly move:** {{ y10_move }} · **2s10s:** {{ curve_2s10s }}
+**10Y, five sessions to {{ y10_day or "n/a" }}:** {{ y10_move }} · **2s10s:** {{ curve_2s10s }}
 
 {% if fred is defined and not fred.empty %}
 ## US macro dashboard (FRED)
@@ -17,7 +17,14 @@
 {{ c.cross_asset_block() }}
 ## Transmission map
 - **Yields → Metals:** gold vs 10Y nominal: {{ gold_y10 }} · gold vs 10Y **real** yield (FRED): {{ gold_real }} (recent/full). A negative reading means the usual real-rate relationship holds. A positive reading means safe-haven or central-bank demand is outweighing rates.
-- **Yields → FX:** the USDJPY vs 10Y relationship is in the shift table. Watch for intervention headlines under the `fx` driver.
-- **Yields → Equities:** if `{{ anchor }}`'s correlation to 10Y has turned negative, then hot data is bearish for stocks ("good news is bad news").
+{% if fx_vs_y10 %}
+- **Yields → FX:** {% for p, v in fx_vs_y10.items() %}{{ p }} vs 10Y: {{ "%+.2f" | format(v[0]) }} / {{ "%+.2f" | format(v[1]) }} (recent/full){% if v[0] < 0.2 and v[1] >= 0.2 %}, so the pair has stopped following US yields: watch for intervention headlines under the `fx` driver{% endif %}{{ "; " if not loop.last else "." }}{% endfor %}
+
+{% endif %}
+{% if anchor_y10 %}
+- **Yields → Equities:** `{{ anchor }}` vs 10Y: {{ "%+.2f" | format(anchor_y10[0]) }} / {{ "%+.2f" | format(anchor_y10[1]) }} (recent/full). {% if anchor_y10[0] <= -0.2 %}Stocks are falling when yields rise, so a hot print is bearish for equities ("good news is bad news").{% elif anchor_y10[0] >= 0.2 %}Stocks and yields are rising together, so the market is trading growth: a hot print is not bearish for equities by itself.{% else %}No clear link at the moment: equities are not trading off yields.{% endif %}
+
+{% endif %}
 {{ c.global_block() }}
 {{ c.model_block() }}
+{{ c.notes_block() }}
