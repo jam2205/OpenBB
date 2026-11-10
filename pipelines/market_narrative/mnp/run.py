@@ -19,7 +19,7 @@ log = logging.getLogger("mnp")
 ROOT = Path(__file__).resolve().parent.parent
 
 
-_REQUIRED = ("models", "predictive", "universe", "openbb", "calendar", "fred", "snb", "imf", "regimes", "drivers",
+_REQUIRED = ("models", "predictive", "universe", "openbb", "calendar", "fred", "fmp", "snb", "imf", "regimes", "drivers",
              "corr_window", "lookback_days")
 
 
@@ -195,10 +195,25 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
 
         snb_block = _guard("snb", lambda: snb_mod.block(asof), {})
 
-    # 5. Fundamentals for reporters (earnings regime)
+    # 5. Fundamentals for reporters. FMP cards whenever a focus name reports (any week type);
+    #    the yfinance + document-tone block stays for earnings weeks.
     funds = {}
     if regime["name"] == "earnings_week":
         funds = _guard("fundamentals", lambda: _fundamentals_section(regime["reporters"], ob, nlp), {})
+    fcfg = cfg.get("fmp", {})
+    cards, us_data, sectors, industries = [], pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    if fcfg.get("enabled", True):
+        from . import fmp as fmp_mod
+
+        if fmp_mod.available():
+            names = list(dict.fromkeys(regime.get("reporters", []) + fcfg.get("always_cards", [])))[: fcfg.get("max_cards", 3)]
+            px = prices.ffill().iloc[-1] if not prices.empty else pd.Series(dtype=float)
+            cards = [_guard(f"fmp card {s_}", lambda s_=s_: fmp_mod.company_card(s_, float(px[s_]) if s_ in px and pd.notna(px[s_]) else None), None)
+                     for s_ in names]
+            cards = [c for c in cards if c]
+            us_data = _guard("fmp us scorecard", lambda: fmp_mod.us_scorecard(asof, fcfg.get("us_indicators")), pd.DataFrame())
+            sectors = _guard("fmp sectors", lambda: fmp_mod.sector_snapshot(asof), pd.DataFrame())
+            industries = _guard("fmp industries", lambda: fmp_mod.industry_movers(asof), pd.DataFrame())
     earnings_tone = float(driver_summary.set_index("driver").net_tone.get("earnings", 0.0)) if not driver_summary.empty else 0.0
 
     # 6. Predictive model (AcyLa per-ETF ensembles; needs >= ~300 bars for its 200-day features)
@@ -228,7 +243,8 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         driver_method=scored["driver_method"].iloc[0] if not scored.empty else "n/a", fundamentals=funds, earnings_tone=earnings_tone,
         y10_move=y10_move, rates=rates, curve_2s10s=curve, gold_y10=gold_y10,
         predictions=predictions, model_note=model_note,
-        fred=fred_tbl, gold_real=gold_real, snb=snb_block, calendar_tbl=calendar_tbl, carry=carry_tbl,
+        fred=fred_tbl, gold_real=gold_real, cards=cards, us_data=us_data, sectors=sectors, industries=industries,
+        sectors_asof=sectors.attrs.get("asof") if not sectors.empty else None, snb=snb_block, calendar_tbl=calendar_tbl, carry=carry_tbl,
         imf_macro=imf_macro.tail(20) if not imf_macro.empty else imf_macro, chokepoints=choke_tbl,
     )
     path = report.render(ctx, regime["template"], out_dir)

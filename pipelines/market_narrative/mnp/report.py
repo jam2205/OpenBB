@@ -10,10 +10,12 @@ from jinja2 import Environment, FileSystemLoader
 _TPL = Path(__file__).parent / "templates"
 
 
-def _md(df: pd.DataFrame | None, floatfmt: str = ".3f") -> str:
+def _md(df: pd.DataFrame | None, floatfmt: str = ",.2f") -> str:
     if df is None or df.empty:
         return "_no data_"
-    return df.to_markdown(floatfmt=floatfmt)
+    # A table made only of text columns is already formatted: stop tabulate re-parsing its numbers.
+    textual = not any(pd.api.types.is_numeric_dtype(dt) for dt in df.dtypes)
+    return df.to_markdown(disable_numparse=True) if textual else df.to_markdown(floatfmt=floatfmt)
 
 
 def render(ctx: dict, template: str, out_dir: str | Path, html: bool = True) -> Path:

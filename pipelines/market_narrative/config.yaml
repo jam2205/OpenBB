@@ -61,6 +61,15 @@ fred:
     ICSA: Initial jobless claims
   gold_driver: DFII10
 
+# FMP direct (key). Company cards for names reporting this week, a US data scorecard, sector and
+# industry moves. Built on endpoints verified on a Starter-level plan; see mnp/fmp.py.
+fmp:
+  enabled: true
+  max_cards: 3
+  always_cards: []            # tickers to card every week even when they are not reporting
+  us_indicators: [CPI, federalFunds, unemploymentRate, totalNonfarmPayroll, initialClaims,
+                  retailSales, consumerSentiment]
+
 # Swiss National Bank data portal (data.snb.ch): no key. Adds the Switzerland / CHF section.
 snb:
   enabled: true

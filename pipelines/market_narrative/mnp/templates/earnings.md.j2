@@ -4,6 +4,7 @@
 {{ regime.reporters | join(", ") or "_none from focus list_" }}
 
 {% for sym, f in fundamentals.items() %}
+{% if not cards %}
 ### {{ sym }}
 **Key metrics**
 {{ f.metrics | md }}
@@ -14,8 +15,9 @@
 **Last quarters (income, USD bn)**
 {{ f.income | md }}
 
+{% endif %}
 {% if f.doc_tone %}
-**Management language**
+**{{ sym }}: management language**
 | Document | Net tone | % negative chunks | Chunks | Method |
 |---|---:|---:|---:|---|
 {% for name, d in f.doc_tone.items() %}
@@ -25,9 +27,16 @@
 - *{{ name }}, most cautious passage:* "{{ d.most_negative }}…"
 {% endfor %}
 {% endif %}
+{% endfor %}
+{% for name, d in f.doc_tone.items() if d.most_negative is defined %}
+- *{{ name }}, most cautious passage:* "{{ d.most_negative }}…"
+{% endfor %}
+{% endif %}
 
 {% endfor %}
 {{ c.calendar_block() }}
+{{ c.cards_block() }}
+{{ c.us_data_block() }}
 {{ c.drivers_block() }}
 {{ c.cross_asset_block() }}
 ## What to watch

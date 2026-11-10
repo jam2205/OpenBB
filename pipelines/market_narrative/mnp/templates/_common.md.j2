@@ -15,6 +15,79 @@
 {% endif %}
 {% endmacro %}
 
+{% macro cards_block() %}
+{% for c in cards %}
+## {{ c.symbol }}: earnings card
+{% if c.next %}
+**Next report: {{ c.next.date }}** · EPS expected {{ c.next.eps_est }} · revenue expected ${{ "%.1f" | format(c.next.revenue_est_bn) }}bn{% if c.next.beat_rate %} · track record: {{ c.next.beat_rate }}{% endif %}
+
+{% endif %}
+{% if not c.moves.empty %}
+**Price change, %**
+{{ c.moves | md }}
+{% endif %}
+{% if not c.track.empty %}
+**Actual vs estimate, last quarters** (revenue in USD bn)
+{{ c.track | md }}
+{% endif %}
+{% if not c.income.empty %}
+**Quarterly results**
+{{ c.income | md }}
+{% endif %}
+{% if not c.forward.empty %}
+**Consensus for coming fiscal years**
+{{ c.forward | md }}
+{% endif %}
+{% if not c.street.empty %}
+**Analyst view**
+{{ c.street | md }}
+{% endif %}
+{% if not c.ratings_trend.empty %}
+**Rating counts by month**
+{{ c.ratings_trend | md }}
+{% endif %}
+{% if not c.rating_changes.empty %}
+**Recent upgrades and downgrades**
+{{ c.rating_changes | md }}
+{% endif %}
+{% if not c.quality.empty %}
+**Quality and valuation**
+{{ c.quality | md }}
+{% endif %}
+{% if not c.products.empty %}
+**Revenue by product, FY{{ c.segment_year }}** (USD bn)
+{{ c.products | md }}
+{% endif %}
+{% if not c.geography.empty %}
+**Revenue by geography** (USD bn)
+{{ c.geography | md }}
+{% endif %}
+{% if not c.peers.empty %}
+**Peers**
+{{ c.peers | md }}
+{% endif %}
+{% if not c.filings.empty %}
+**Recent filings**
+{{ c.filings | md }}
+{% endif %}
+{% endfor %}
+{% endmacro %}
+
+{% macro us_data_block() %}
+{% if us_data is defined and not us_data.empty %}
+## US data scorecard (latest released prints)
+{{ us_data | md }}
+{% endif %}
+{% if sectors is defined and not sectors.empty %}
+## Sector moves and valuation ({{ sectors_asof }}, average one-day change)
+{{ sectors | md }}
+{% endif %}
+{% if industries is defined and not industries.empty %}
+**Best and worst industries**
+{{ industries | md }}
+{% endif %}
+{% endmacro %}
+
 {% macro drivers_block() %}
 ## News drivers (FinBERT tone × {{ driver_method }} attribution)
 {{ driver_summary | md }}

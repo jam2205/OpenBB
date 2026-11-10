@@ -66,8 +66,21 @@ own "as of" date and is flagged when older than its release rhythm allows. The p
 cubes (`rendoblid`, `rendopar`) stopped in July 2025 and are deliberately not used.
 
 ## FMP
-FMP serves different endpoints per plan and answers 402 for the rest. `mnp/fmp_probe.py` asks each
-endpoint once and reports which ones your key can use, so sources are chosen from evidence.
+FMP serves different endpoints per plan and answers 402 for the rest, so sources are chosen from
+evidence: `mnp/fmp_probe.py` asks each endpoint once (`probe()` for 46 core ones,
+`probe(extended=True)` for about 85 more) and reports which your key can use.
+
+`mnp/fmp.py` is built on the ones verified on a Starter-level plan (2026-11-10):
+
+| In the report | From |
+|---|---|
+| **Earnings card** for each focus name reporting this week: next date with EPS and revenue expected, actual-vs-estimate history, quarterly results, consensus for coming fiscal years, analyst ratings and price targets, rating counts by month, upgrades and downgrades, quality scores (Altman Z, Piotroski), valuation and DCF, revenue by product and geography, peers, recent filings | earnings, income-statement, analyst-estimates, grades*, price-target*, financial-scores, ratios-ttm, key-metrics-ttm, discounted-cash-flow, revenue-*-segmentation, stock-peers, sec-filings-search |
+| **US data scorecard**: latest released print of CPI, Fed funds, unemployment, payrolls, claims, retail sales, sentiment | economic-indicators |
+| **Sector moves and valuation**, best and worst industries | sector-/industry-performance-snapshot, sector-pe-snapshot |
+
+Cards appear in every report type, so an earnings name is not lost in a macro week. Not on that
+plan, and so not used: news, economic calendar, transcripts, COT, insider search, intraday bars.
+Plan limits respected: at most 5 rows on earnings and statements, annual estimates and segments only.
 
 ## Where to extend
 | Want to… | Edit |

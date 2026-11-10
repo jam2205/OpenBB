@@ -5,7 +5,8 @@ way to pick "the best sources" is to ask. This calls each endpoint once with you
 reports: ok (rows returned), empty, plan (402/403: not on your plan), missing (404), or error.
 
     from mnp.fmp_probe import probe
-    probe()            # about 45 requests; the free plan allows 250 a day
+    probe()                 # 46 core endpoints
+    probe(extended=True)    # about 85 more across the rest of the catalogue
 
 The key is read from FMP_API_KEY and is never printed.
 """
@@ -77,17 +78,109 @@ def _endpoints(sym: str, fx: str) -> list[tuple[str, str, str, dict]]:
     ]
 
 
-def probe(symbol: str = "NVDA", fx: str = "EURUSD", api_key: str | None = None, pause: float = 0.25) -> pd.DataFrame:
+def _extended(sym: str, fx: str) -> list[tuple[str, str, str, dict]]:
+    """A second sweep across the rest of the catalogue."""
+    today = date.today()
+    d0, back, yr = today.isoformat(), (today - timedelta(days=30)).isoformat(), (today - timedelta(days=365)).isoformat()
+    last_wd = today - timedelta(days=max(0, today.weekday() - 4)) - timedelta(days=1 if today.weekday() < 5 else 0)
+    while last_wd.weekday() >= 5:
+        last_wd -= timedelta(days=1)
+    wd = last_wd.isoformat()
+    q = {"symbol": sym}
+    econ = [("macro", f"Economic indicator ({n})", "economic-indicators", {"name": n, "from": yr, "to": d0})
+            for n in ("CPI", "inflationRate", "federalFunds", "unemploymentRate", "realGDP", "consumerSentiment",
+                      "retailSales", "totalNonfarmPayroll", "initialClaims", "industrialProductionTotalIndex",
+                      "30YearFixedRateMortgageAverage", "durableGoods")]
+    return econ + [
+        ("fundamentals", "Key metrics (annual)", "key-metrics", {**q, "limit": 5}),
+        ("fundamentals", "Ratios (annual)", "ratios", {**q, "limit": 5}),
+        ("fundamentals", "Financial growth", "financial-growth", {**q, "limit": 5}),
+        ("fundamentals", "Income statement growth", "income-statement-growth", {**q, "limit": 5}),
+        ("fundamentals", "Enterprise values", "enterprise-values", {**q, "limit": 5}),
+        ("fundamentals", "Owner earnings", "owner-earnings", {**q, "limit": 5}),
+        ("fundamentals", "Levered DCF", "levered-discounted-cash-flow", q),
+        ("fundamentals", "Income statement TTM", "income-statement-ttm", {**q, "limit": 1}),
+        ("fundamentals", "As-reported income", "income-statement-as-reported", {**q, "limit": 2}),
+        ("fundamentals", "Statement dates", "financial-reports-dates", q),
+        ("fundamentals", "Peers", "stock-peers", q),
+        ("fundamentals", "Shares float", "shares-float", q),
+        ("fundamentals", "Market cap", "market-capitalization", q),
+        ("fundamentals", "Market cap history", "historical-market-capitalization", {**q, "from": back, "to": d0}),
+        ("fundamentals", "Employee count", "employee-count", {**q, "limit": 5}),
+        ("fundamentals", "Executives", "key-executives", q),
+        ("fundamentals", "Dividends (company)", "dividends", {**q, "limit": 5}),
+        ("fundamentals", "Splits (company)", "splits", {**q, "limit": 5}),
+        ("fundamentals", "ESG ratings", "esg-ratings", q),
+        ("fundamentals", "ESG disclosures", "esg-disclosures", q),
+        ("earnings", "Grades history", "grades-historical", {**q, "limit": 5}),
+        ("earnings", "Ratings history", "ratings-historical", {**q, "limit": 5}),
+        ("earnings", "Price target news", "price-target-news", {**q, "limit": 5}),
+        ("earnings", "Grades news", "grades-news", {**q, "limit": 5}),
+        ("earnings", "Earnings calendar (confirmed)", "earnings-calendar-confirmed", {"from": d0, "to": (today + timedelta(days=14)).isoformat()}),
+        ("prices", "Price change summary", "stock-price-change", q),
+        ("prices", "Daily history (full OHLC)", "historical-price-eod/full", {**q, "from": back, "to": d0}),
+        ("prices", "Daily, dividend adjusted", "historical-price-eod/dividend-adjusted", {**q, "from": back, "to": d0}),
+        ("prices", "Intraday 1 hour", "historical-chart/1hour", {**q, "from": back, "to": d0}),
+        ("prices", "Intraday 5 min", "historical-chart/5min", {**q, "from": d0, "to": d0}),
+        ("prices", "Intraday 1 hour (FX)", "historical-chart/1hour", {"symbol": fx, "from": back, "to": d0}),
+        ("prices", "Aftermarket quote", "aftermarket-quote", q),
+        ("prices", "Batch quote", "batch-quote", {"symbols": f"{sym},AAPL,SPY"}),
+        ("prices", "Batch FX quotes", "batch-forex-quotes", {}),
+        ("prices", "Batch commodity quotes", "batch-commodity-quotes", {}),
+        ("prices", "Batch index quotes", "batch-index-quotes", {}),
+        ("prices", "Index list", "index-list", {}),
+        ("prices", "Index history (S&P 500)", "historical-price-eod/light", {"symbol": "^GSPC", "from": back, "to": d0}),
+        ("prices", "Index history (VIX)", "historical-price-eod/light", {"symbol": "^VIX", "from": back, "to": d0}),
+        ("prices", "Crypto list", "cryptocurrency-list", {}),
+        ("prices", "Crypto history (BTC)", "historical-price-eod/light", {"symbol": "BTCUSD", "from": back, "to": d0}),
+        ("technical", "RSI", "technical-indicators/rsi", {**q, "periodLength": 14, "timeframe": "1day", "from": back, "to": d0}),
+        ("technical", "SMA", "technical-indicators/sma", {**q, "periodLength": 50, "timeframe": "1day", "from": back, "to": d0}),
+        ("technical", "EMA", "technical-indicators/ema", {**q, "periodLength": 20, "timeframe": "1day", "from": back, "to": d0}),
+        ("technical", "ADX", "technical-indicators/adx", {**q, "periodLength": 14, "timeframe": "1day", "from": back, "to": d0}),
+        ("macro", "Industry performance", "industry-performance-snapshot", {"date": wd}),
+        ("macro", "Industry P/E", "industry-pe-snapshot", {"date": wd}),
+        ("macro", "Sector performance history", "historical-sector-performance", {"sector": "Technology", "from": back, "to": d0}),
+        ("macro", "Sector P/E history", "historical-sector-pe", {"sector": "Technology", "from": back, "to": d0}),
+        ("macro", "Biggest gainers", "biggest-gainers", {}),
+        ("macro", "Biggest losers", "biggest-losers", {}),
+        ("macro", "Most active", "most-actives", {}),
+        ("macro", "Market hours", "exchange-market-hours", {"exchange": "NASDAQ"}),
+        ("macro", "Exchange holidays", "holidays-by-exchange", {"exchange": "NASDAQ"}),
+        ("etf", "ETF holdings", "etf/holdings", {"symbol": "SPY"}),
+        ("etf", "ETF info", "etf/info", {"symbol": "SPY"}),
+        ("etf", "ETF sector weights", "etf/sector-weightings", {"symbol": "SPY"}),
+        ("etf", "ETF country weights", "etf/country-weightings", {"symbol": "EEM"}),
+        ("etf", "ETF asset exposure", "etf/asset-exposure", q),
+        ("index", "S&P 500 constituents", "sp500-constituent", {}),
+        ("index", "Nasdaq constituents", "nasdaq-constituent", {}),
+        ("index", "Dow constituents", "dowjones-constituent", {}),
+        ("positioning", "COT list", "commitment-of-traders-list", {}),
+        ("positioning", "Senate trades (latest)", "senate-latest", {"limit": 10}),
+        ("positioning", "House trades (latest)", "house-latest", {"limit": 10}),
+        ("positioning", "13F positions summary", "institutional-ownership/symbol-positions-summary", {**q, "year": today.year, "quarter": 2}),
+        ("positioning", "Beneficial ownership", "acquisition-of-beneficial-ownership", q),
+        ("filings", "Latest 8-K", "sec-filings-8k", {"from": back, "to": d0, "limit": 10}),
+        ("filings", "Latest filings", "sec-filings-financials", {"from": back, "to": d0, "limit": 10}),
+        ("filings", "M&A latest", "mergers-acquisitions-latest", {"limit": 10}),
+        ("search", "Symbol search", "search-symbol", {"query": sym}),
+        ("search", "Screener", "company-screener", {"marketCapMoreThan": 500000000000, "limit": 5}),
+    ]
+
+
+def probe(symbol: str = "NVDA", fx: str = "EURUSD", api_key: str | None = None, pause: float = 0.25,
+          extended: bool = False) -> pd.DataFrame:
     import requests
 
     api_key = api_key or os.environ.get("FMP_API_KEY")
     if not api_key:
         raise RuntimeError("FMP_API_KEY is not set (run the keys cell first)")
     rows = []
-    for use, label, path, params in _endpoints(symbol, fx):
+    for use, label, path, params in (_extended(symbol, fx) if extended else _endpoints(symbol, fx)):
         status, n, fields = "error", 0, ""
         try:
-            r = requests.get(f"{BASE}/{path}", params={**params, "apikey": api_key}, timeout=30)
+            # "proxy-injected": a network proxy adds the key as a header, so none is sent here
+            auth = {} if api_key == "proxy-injected" else {"apikey": api_key}
+            r = requests.get(f"{BASE}/{path}", params={**params, **auth}, timeout=30)
             if r.status_code in (402, 403):
                 status = "plan"
             elif r.status_code == 404:
