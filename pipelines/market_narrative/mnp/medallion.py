@@ -101,6 +101,17 @@ def role(name: str) -> str | None:
 
 
 def available() -> bool:
+    """Is a reader registered? If not, adopt the notebook's own `read` / `tables` when the
+    connector cell has been run: re-running the notebook's first cell reloads this package and
+    would otherwise silently drop the registration."""
+    if _read is None:
+        import sys
+
+        main = sys.modules.get("__main__")
+        rd, tb = getattr(main, "read", None), getattr(main, "tables", None)
+        if callable(rd) and callable(tb):
+            register(rd, tb)
+            log.warning("reader picked up from the notebook (read, tables); roles: %s", roles())
     return _read is not None
 
 

@@ -124,7 +124,8 @@ def run(pair_list: list[str] | None = None, out_dir: str | Path = "reports/pairs
     from .run import load_config
 
     if not medallion.available():
-        raise RuntimeError("pair briefs read your own data store: run your connector cell and medallion.register(read, tables) first")
+        raise RuntimeError("pair briefs read your own data store, and no reader is connected. Run your connector cell "
+                           "(the one that prints '5/5 connected'), then run this cell again.")
     cfg = cfg or load_config()
     pair_list = pair_list or cfg.get("pairs", {}).get("list") or []
     out, shared, briefs, rows = Path(out_dir), {}, {}, []
