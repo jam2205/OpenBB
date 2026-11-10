@@ -47,6 +47,14 @@ def closes(symbols: list[str], start: date, provider: str, kind: str = "equity")
     return wide
 
 
+def ohlcv(symbol: str, start: date, provider: str) -> pd.DataFrame:
+    """Full OHLCV for one symbol (lower-case columns, date index)."""
+    df = _safe(_obb().equity.price.historical, symbol=symbol, start_date=start, provider=provider)
+    if not df.empty:
+        df.index = pd.to_datetime(df.index)
+    return df
+
+
 def minio_closes(pairs: list[str], cfg: dict) -> pd.DataFrame:
     """Load FX closes for pairs not covered by OpenBB from MinIO (parquet or csv)."""
     if not pairs:

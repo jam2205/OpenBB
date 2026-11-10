@@ -28,9 +28,13 @@ Top headlines for the dominant driver:
 {% endmacro %}
 
 {% macro model_block() %}
-## Predictive model
-{% if predictions is not none %}
+## Predictive model (AcyLa LightGBM ensemble)
+{% if predictions is not none and not predictions.empty %}
 {{ predictions | md }}
+
+_`shown_signal` is "no skill" when the model's own test-set directional accuracy is below 55%.
+`sharpe_adj` = published Sharpe ÷ √horizon (the published figure overlaps returns).
+These are single-split, no-baseline numbers: treat them as context, not as trade calls._
 {% else %}
 _{{ model_note }}_
 {% endif %}

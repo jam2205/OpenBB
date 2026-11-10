@@ -99,16 +99,21 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
                              for k, v in docs.items()}
     earnings_tone = float(driver_summary.set_index("driver").net_tone.get("earnings", 0.0)) if not driver_summary.empty else 0.0
 
-    # 6. Predictive model
+    # 6. Predictive model (AcyLa per-ETF ensembles; needs >= ~300 bars for its 200-day features)
     predictions, model_note = None, "model disabled"
     if use_model:
         try:
-            from .predictive import Predictive, build_features
+            from .predictive import COVERED, AcyLaModel
 
-            m = Predictive(cfg["models"]["predictive"])
-            predictions = m.predict(build_features(rets, driver_summary)).tail(5)
+            mcfg = cfg["predictive"]
+            m = AcyLaModel(cfg["models"]["predictive"], mcfg.get("revision"), mcfg.get("use_lstm", False))
+            hist_start = asof - timedelta(days=mcfg.get("history_days", 900))
+            targets = [t for t in mcfg["tickers"] if t in COVERED]
+            predictions = m.predict_many({t: sources.ohlcv(t, hist_start, ob["price_provider"]) for t in targets})
+            model_note = "no predictions returned" if predictions.empty else ""
         except Exception as e:  # noqa: BLE001
-            model_note = f"predictive model not wired yet: {e}"
+            model_note = f"predictive model unavailable: {e}"
+            predictions = None
 
     ctx = dict(
         asof=asof.isoformat(), regime=regime, anchor=anchor, corr_window=cfg["corr_window"],

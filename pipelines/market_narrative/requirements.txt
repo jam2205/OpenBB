@@ -14,3 +14,9 @@ markdown
 datasets        # only for mnp.finetune
 accelerate      # only for mnp.finetune
 # flash-attn    # optional, Ampere+ GPUs (A100/L4); skip on T4
+# AcyLa/multi-asset-predictive-model runtime
+lightgbm
+ta
+yfinance
+scipy
+pyarrow

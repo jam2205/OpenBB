@@ -33,13 +33,16 @@ python -m mnp.run --out reports            # add --no-nlp / --no-model to skip h
 | Change what counts as a bond / earnings / Fed week | `config.yaml → regimes` (first match wins) |
 | Add a news driver | `config.yaml → drivers` (one descriptive sentence per driver) |
 | New report type (e.g. OPEC week) | add a `regimes` rule + `mnp/templates/<name>.md.j2` (reuse the `_common` macros) |
-| Wire the predictive model | run `Predictive(...).inspect()`, then set `FEATURE_COLUMNS` / `predict()` in `mnp/predictive.py` |
+| Change which ETFs get model forecasts | `config.yaml → predictive.tickers` (14 covered ETFs only) |
 
 ## Notes
-- **Predictive model:** the adapter detects whether the repo ships transformers, joblib/pkl,
-  ONNX, or torch weights. Its input features are not yet known, so the report shows a
-  "not wired" note until `predict()` matches the model card. Loading a pickle runs code, so
-  only load it from a repo you trust.
+- **Predictive model (`AcyLa/multi-asset-predictive-model`):** per-ETF LightGBM (+ optional LSTM)
+  models forecast returns 1, 5 and 21 days ahead. The pipeline runs the repo's own feature code on OpenBB OHLCV.
+  Caveats from reviewing its code:
+  - The published Sharpe overlaps h-day returns, which inflates it by about √h. The report shows `sharpe_adj` = Sharpe/√h instead (SPY 21-day: 7.2 → ~1.6).
+  - Its accuracy comes from one 70/15/15 split with no purge gap and no buy-and-hold baseline, so treat it as an upper bound.
+  - **GLD, SLV and USO test below 50% directional accuracy**, so they display as "no skill". Use the cross-asset and NLP sections for metals.
+  - The model files are pickles, so loading them runs code from that repo. Pin `predictive.revision` to a reviewed commit.
 - **Models (all pre-trained, no training needed):**
   | Job | Model |
   |---|---|

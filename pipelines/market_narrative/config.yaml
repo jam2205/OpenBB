@@ -12,6 +12,13 @@ models:
   device: auto                                 # auto | cpu | cuda
 
 lookback_days: 180
+
+# AcyLa/multi-asset-predictive-model: per-ETF LightGBM(+LSTM), horizons 1/5/21d.
+predictive:
+  tickers: [SPY, QQQ, GLD, SLV, USO, EEM, EFA, EWJ]   # only these 14 are covered: + EWG EWU FXI INDA EWZ KWEB
+  history_days: 900        # its features need ~200+ bars of warm-up
+  use_lstm: false          # LightGBM-only is the repo's own "fast mode"; true also loads the LSTMs
+  revision: null           # pin a commit hash once reviewed (model files are pickles)
 corr_window: 20            # rolling correlation window (trading days)
 
 # Focus assets get a full section. Peers feed the cross-asset / correlation block.
