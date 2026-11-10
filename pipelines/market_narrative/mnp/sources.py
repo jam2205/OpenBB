@@ -127,13 +127,17 @@ def econ_calendar(start: date, end: date, providers: list[str] | str,
     providers = [providers] if isinstance(providers, str) else providers
     frames = []
     for p in providers:
-        if p == "fred_rest":
-            df = rest.fred_release_calendar(start, end)
-        elif p == "treasury_auctions":
-            df = rest.treasury_auctions(start, end, auction_terms)
-        else:
-            df = _safe(_obb().economy.calendar, start_date=start, end_date=end, provider=p)
-            df = df.reset_index() if not df.empty else df
+        try:  # a calendar source must never stop the run
+            if p == "fred_rest":
+                df = rest.fred_release_calendar(start, end)
+            elif p == "treasury_auctions":
+                df = rest.treasury_auctions(start, end, auction_terms)
+            else:
+                df = _safe(_obb().economy.calendar, start_date=start, end_date=end, provider=p)
+                df = df.reset_index() if not df.empty else df
+        except Exception as e:  # noqa: BLE001
+            log.warning("calendar source %s skipped: %s: %s", p, type(e).__name__, _SECRET.sub(r"\1=***", str(e))[:200])
+            continue
         if not df.empty:
             frames.append(df.assign(calendar_source=p))
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()

@@ -23,6 +23,77 @@ def load_config(path: str | Path | None = None) -> dict:
     return yaml.safe_load(Path(path or ROOT / "config.yaml").read_text())
 
 
+def _guard(name: str, fn, default):
+    """Run an optional report section; on any error log one line and return the default."""
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001
+        msg = sources._SECRET.sub(r"\1=***", str(e)).strip().splitlines()
+        log.warning("section '%s' skipped: %s: %s", name, type(e).__name__, (msg[0] if msg else "")[:200])
+        return default
+
+
+def _rates_section(asof):
+    rates = sources._safe(sources._obb().fixedincome.government.treasury_rates,
+                          start_date=asof - timedelta(days=14), provider="federal_reserve")
+    curve = "n/a"
+    if not rates.empty and {"year_2", "year_10"} <= set(rates.columns):
+        last = rates.iloc[-1]
+        curve = _fmt_bp((last["year_10"] - last["year_2"]) * 100)  # provider returns decimals
+        rates = rates[[c for c in ("month_3", "year_2", "year_5", "year_10", "year_30") if c in rates]].tail(5)
+    return rates, curve
+
+
+def _fred_section(cfg, prices, gold, start):
+    fcfg = cfg.get("fred", {})
+    fr = sources.fred(list(fcfg.get("series", {})), start)
+    if fr.empty:
+        return pd.DataFrame(), "n/a"
+    ff = fr.ffill()
+    last_date = ff.index[-1]
+
+    def _chg(days):
+        past = ff[ff.index <= last_date - timedelta(days=days)]
+        return ff.iloc[-1] - past.iloc[-1] if not past.empty else pd.Series(index=ff.columns, dtype=float)
+
+    tbl = pd.DataFrame({"name": pd.Series(fcfg["series"]), "last": ff.iloc[-1],
+                        "chg_1w": _chg(7), "chg_1m": _chg(30)}).dropna(subset=["last"]).round(3)
+    gold_real, gd = "n/a", fcfg.get("gold_driver")
+    if gold and gd in fr and gold in prices:
+        j = pd.concat([np.log(prices[gold]).diff(), fr[gd].diff()], axis=1, keys=["g", "r"]).dropna()
+        if len(j) > cfg["corr_window"]:
+            gold_real = f"{j.tail(cfg['corr_window']).corr().iloc[0, 1]:+.2f} / {j.corr().iloc[0, 1]:+.2f}"
+    return tbl, gold_real
+
+
+def _chokepoint_section(cfg, asof):
+    choke = sources.chokepoints(cfg.get("imf", {}).get("chokepoints", []), asof - timedelta(days=90))
+    if choke.empty or "chokepoint" not in choke or "date" not in choke:
+        return pd.DataFrame()
+    num = choke.select_dtypes("number").columns
+    col = next((c for c in ("vessels_total", "capacity_total") if c in num), num[0] if len(num) else None)
+    if col is None:
+        return pd.DataFrame()
+    piv = choke.pivot_table(index="date", columns="chokepoint", values=col).sort_index()
+    tbl = pd.DataFrame({"last_7d_avg": piv.tail(7).mean(), "prior_90d_avg": piv.mean()})
+    tbl["vs_90d_pct"] = (tbl["last_7d_avg"] / tbl["prior_90d_avg"] - 1) * 100
+    return tbl.round(1)
+
+
+def _fundamentals_section(symbols, ob, nlp):
+    funds = {}
+    for sym in symbols:
+        f = _guard(f"fundamentals {sym}", lambda: sources.fundamentals(sym, ob["price_provider"]),
+                   {"metrics": pd.DataFrame(), "income": pd.DataFrame(), "estimates": pd.DataFrame()})
+        docs = _guard(f"documents {sym}", lambda: sources.documents(
+            sym, ob.get("transcript_provider", "fmp"), ob.get("mdna_provider", "sec")), {})
+        empty = {"net_tone": float("nan"), "chunks": 0, "method": "n/a"}
+        f["doc_tone"] = {k: (_guard(f"{k} tone {sym}", lambda v=v: nlp.document_tone(v), empty) if nlp else empty)
+                         for k, v in docs.items()}
+        funds[sym] = f
+    return funds
+
+
 def _fmt_bp(x) -> str:
     """x in percentage points (0.10 -> +10bp)."""
     return "n/a" if pd.isna(x) else f"{x * 100:+.0f}bp"
@@ -53,7 +124,8 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
     econ = sources.econ_calendar(w0, w1, ob.get("econ_calendar_providers", ["fred_rest", "treasury_auctions"]),
                                  ob.get("auction_terms"))
     earn = sources.earnings_calendar(w0, w1, ob["earnings_provider"])
-    regime = rg.detect(cfg, econ, earn)
+    regime = _guard("regime", lambda: rg.detect(cfg, econ, earn),
+                    {**cfg["regimes"][-1], "events": [], "reporters": [], "also": []})
     log.info("Regime: %s", regime["name"])
 
     # 3. NLP over news
@@ -64,9 +136,13 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         from .nlp import NLP
 
         nlp = NLP({**cfg["models"]})
-        news = sources.news(u["equities"], ob["news_provider"])
-        scored = nlp.attribute_drivers(news, cfg["drivers"], cfg.get("zero_shot_threshold", 0.35))
-        driver_summary = NLP.driver_summary(scored)
+
+        def _news():
+            news = sources.news(u["equities"], ob["news_provider"])
+            sc = nlp.attribute_drivers(news, cfg["drivers"], cfg.get("zero_shot_threshold", 0.35))
+            return sc, NLP.driver_summary(sc)
+
+        scored, driver_summary = _guard("news NLP", _news, (pd.DataFrame(), pd.DataFrame()))
     dom = driver_summary.iloc[0] if not driver_summary.empty else None
     top = []
     if dom is not None:
@@ -84,55 +160,17 @@ def run(config: str | Path | None = None, asof: date | None = None, out_dir: str
         gold_y10 = f"{r:+.2f} / {f:+.2f}"
     y10_move = _fmt_bp(prices[y10].ffill().diff(5).iloc[-1]) if y10 in prices else "n/a"
 
-    rates = sources._safe(sources._obb().fixedincome.government.treasury_rates,
-                          start_date=asof - timedelta(days=14), provider="federal_reserve")
-    curve = "n/a"
-    if not rates.empty and {"year_2", "year_10"} <= set(rates.columns):
-        last = rates.iloc[-1]
-        curve = _fmt_bp((last["year_10"] - last["year_2"]) * 100)  # provider returns decimals
-        rates = rates[[c for c in ("month_3", "year_2", "year_5", "year_10", "year_30") if c in rates]].tail(5)
-
-    # 4a. FRED macro: level, 1w / 1m change; gold vs real yield
-    fcfg = cfg.get("fred", {})
-    fr = sources.fred(list(fcfg.get("series", {})), start)
-    fred_tbl = pd.DataFrame()
-    gold_real = "n/a"
-    if not fr.empty:
-        ff = fr.ffill()
-        last_date = ff.index[-1]
-        def _chg(days):
-            past = ff[ff.index <= last_date - timedelta(days=days)]
-            return ff.iloc[-1] - past.iloc[-1] if not past.empty else pd.Series(index=ff.columns, dtype=float)
-        fred_tbl = pd.DataFrame({"name": pd.Series(fcfg["series"]), "last": ff.iloc[-1], "chg_1w": _chg(7), "chg_1m": _chg(30)})
-        gd = fcfg.get("gold_driver")
-        if gold and gd in fr and gold in prices:
-            j = pd.concat([np.log(prices[gold]).diff(), fr[gd].diff()], axis=1, keys=["g", "r"]).dropna()
-            if len(j) > cfg["corr_window"]:
-                gold_real = f"{j.tail(cfg['corr_window']).corr().iloc[0, 1]:+.2f} / {j.corr().iloc[0, 1]:+.2f}"
-
-    # 4b. IMF: macro for countries/currencies + shipping chokepoints
+    rates, curve = _guard("rates", lambda: _rates_section(asof), (pd.DataFrame(), "n/a"))
+    fred_tbl, gold_real = _guard("fred", lambda: _fred_section(cfg, prices, gold, start), (pd.DataFrame(), "n/a"))
     icfg = cfg.get("imf", {})
-    imf_macro = sources.imf_indicators(icfg.get("indicators", []), icfg.get("countries", []),
-                                       asof - timedelta(days=730))
-    choke = sources.chokepoints(icfg.get("chokepoints", []), asof - timedelta(days=90))
-    choke_tbl = pd.DataFrame()
-    if not choke.empty and "chokepoint" in choke:
-        num = choke.select_dtypes("number").columns
-        col = next((c for c in ("vessels_total", "capacity_total") if c in num), num[0] if len(num) else None)
-        if col and "date" in choke:
-            piv = choke.pivot_table(index="date", columns="chokepoint", values=col).sort_index()
-            choke_tbl = pd.DataFrame({"last_7d_avg": piv.tail(7).mean(), "prior_90d_avg": piv.mean()})
-            choke_tbl["vs_90d_pct"] = (choke_tbl["last_7d_avg"] / choke_tbl["prior_90d_avg"] - 1) * 100
-            choke_tbl = choke_tbl.round(1)
+    imf_macro = _guard("imf", lambda: sources.imf_indicators(
+        icfg.get("indicators", []), icfg.get("countries", []), asof - timedelta(days=730)), pd.DataFrame())
+    choke_tbl = _guard("chokepoints", lambda: _chokepoint_section(cfg, asof), pd.DataFrame())
 
     # 5. Fundamentals for reporters (earnings regime)
     funds = {}
     if regime["name"] == "earnings_week":
-        funds = {s: sources.fundamentals(s, ob["price_provider"]) for s in regime["reporters"]}
-        for s, f in funds.items():
-            docs = sources.documents(s, ob.get("transcript_provider", "fmp"), ob.get("mdna_provider", "sec"))
-            f["doc_tone"] = {k: (nlp.document_tone(v) if nlp else {"net_tone": float("nan"), "chunks": 0, "method": "nlp off"})
-                             for k, v in docs.items()}
+        funds = _guard("fundamentals", lambda: _fundamentals_section(regime["reporters"], ob, nlp), {})
     earnings_tone = float(driver_summary.set_index("driver").net_tone.get("earnings", 0.0)) if not driver_summary.empty else 0.0
 
     # 6. Predictive model (AcyLa per-ETF ensembles; needs >= ~300 bars for its 200-day features)

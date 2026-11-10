@@ -104,10 +104,18 @@ def treasury_auctions(start: date, end: date, terms: list[str] | None = None) ->
     df = df[df["record_date"] == df["record_date"].max()].copy()
     df["date"] = pd.to_datetime(df["auction_date"], errors="coerce")
     df = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)]
+    term = df["security_term"].astype(str) if "security_term" in df else pd.Series("", index=df.index)
+    kind = df["security_type"].astype(str) if "security_type" in df else pd.Series("", index=df.index)
     if terms:
-        df = df[df["security_term"].astype(str).apply(lambda t: any(k.lower() in t.lower() for k in terms))]
+        mask = term.str.contains("|".join(re.escape(t) for t in terms), case=False, regex=True)
     else:
-        df = df[df["security_type"].astype(str).str.lower() != "bill"]
-    df["event"] = "Treasury Auction: " + df["security_term"].astype(str) + " " + df["security_type"].astype(str)
-    cols = ["date", "event"] + (["offering_amt"] if "offering_amt" in df else [])
-    return df[cols].assign(country="US").sort_values("date").reset_index(drop=True)
+        mask = kind.str.lower() != "bill"
+    # .to_numpy(bool): an empty object-dtype mask would be read by pandas as a column list.
+    keep = mask.to_numpy(dtype=bool)
+    df, term, kind = df[keep], term[keep], kind[keep]
+    if df.empty:
+        return pd.DataFrame()
+    out = pd.DataFrame({"date": df["date"], "event": "Treasury Auction: " + term + " " + kind, "country": "US"})
+    if "offering_amt" in df:
+        out["offering_amt"] = df["offering_amt"]
+    return out.sort_values("date").reset_index(drop=True)
